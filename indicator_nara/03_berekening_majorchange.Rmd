@@ -2851,9 +2851,17 @@ write_csv(nat_trend_95 %>%
                    bg_jaar_trend = bg_jaar,
                    og_jaar_indicator = lcl,
                    bg_jaar_indicator = ucl), file.path("data", "result", 
-                                                       paste0("figuur_droog_nara_",
+                                                       paste0("figuur_nat_nara_",
                                                               year(Sys.time()),".csv")))
 ```
 
+```{r figuur-nara-poging}
+df <- droogte_trend_05 %>% 
+            dplyr::select(jaar, gem_jaar, og_jaar, bg_jaar, droogte_ind_j, lcl, ucl, tijdvenster) %>% 
+  filter(tijdvenster == 0)
+g <- ggplot(data = df, aes(x = jaar, y = droogte_ind_j)) + geom_line() +
+  geom_ribbon(aes(y = gem_jaar, ymin = og_jaar, ymax = bg_jaar))
+g
+```
 
 
