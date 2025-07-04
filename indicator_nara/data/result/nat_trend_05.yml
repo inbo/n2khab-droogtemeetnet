@@ -1,12 +1,12 @@
 ..generic:
-  git2rdata: 0.3.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting:
   - jaar
   - tijdvenster
   hash: 3d880bd40ffcb3fc52658af2b685a5aeca21d4f1
-  data_hash: 814be2b27004a04b1f6eaa68a94d22771f41fb96
+  data_hash: eccf088e251c42d86554a818ae3a5015db890139
 jaar:
   class: numeric
 gem_jaar_t:

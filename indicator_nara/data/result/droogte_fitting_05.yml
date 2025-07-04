@@ -1,5 +1,5 @@
 ..generic:
-  git2rdata: 0.3.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting:
@@ -7,8 +7,8 @@
   - jaar
   - simulatienr
   - tijdvenster
-  hash: 67e6f20c92a8cc2b9ce3f77464be0dfbcf2fdebc
-  data_hash: bc2f3acf80cb28e3bb9154048925f1f88650486a
+  hash: 9f67af5a99b71b9a3cdd8c0776b2f8aa014edfc7
+  data_hash: c0ea8c5bdee2a4a554bc41cbaeb916161a2cb9d2
 meetpunt:
   class: factor
   labels:
@@ -193,6 +193,10 @@ jaar_factor:
   - '2016'
   - '2017'
   - '2018'
+  - '2019'
+  - '2020'
+  - '2021'
+  - '2022'
   index:
   - 1
   - 2
@@ -228,6 +232,10 @@ jaar_factor:
   - 32
   - 33
   - 34
+  - 35
+  - 36
+  - 37
+  - 38
   ordered: no
 p05_mean_fitted:
   class: numeric

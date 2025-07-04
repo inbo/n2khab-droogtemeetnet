@@ -1,10 +1,10 @@
 ..generic:
-  git2rdata: 0.3.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting: meetpunt
   hash: e8cbd192bf0591f9c8258d5f54822970dad35e93
-  data_hash: d7354b1a6431ae93d0a1ec5d46cf76f1407db316
+  data_hash: 5d2bf74468f61f2466521ee4be53256fb968a81c
 meetpunt:
   class: factor
   labels:

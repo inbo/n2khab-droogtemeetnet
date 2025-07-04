@@ -1,13 +1,13 @@
 ..generic:
-  git2rdata: 0.3.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting:
   - jaar
   - meetpunt
   - simulatienr
-  hash: feb5ef33ef4172fa9111404171ffae4ad6e9dc1b
-  data_hash: f5087be267ad022746be092d367b0031cb5458e6
+  hash: ed3e3bdd17ce0011d0976aa30b15ad9e5eb04d02
+  data_hash: 27f28d19a58fa51d09b64433b4cde12d85febdac
 meetpunt:
   class: factor
   labels:
@@ -200,6 +200,10 @@ jaar_factor:
   - '2016'
   - '2017'
   - '2018'
+  - '2019'
+  - '2020'
+  - '2021'
+  - '2022'
   index:
   - 1
   - 2
@@ -235,6 +239,10 @@ jaar_factor:
   - 32
   - 33
   - 34
+  - 35
+  - 36
+  - 37
+  - 38
   ordered: no
 dag_onder_p05.0:
   class: integer
