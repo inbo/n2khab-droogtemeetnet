@@ -181,7 +181,7 @@ $t_{js}$ is een term ('random walk') die toelaat om rekening te houden met het f
 Hier beschrijven we die mogelijke afhankelijkheid als een twee-orde relatie:
 $$ \Delta^2 t_{js} = \Delta t_{j+1, s} - \Delta t_j = (t_{j+1,s} - t_{j,s}) - (t_{j,s} - t_{j-1,s}) = t_{j+1,s} - 2t_{j,s} + t_{j-1,s} $$
 
-De verandering van de verandering in de tijd worden verondersteld normaal verdeeld te zijn, met gemiddelde 0 en variantie $\sigma^2$.
+De veranderingen van de verandering in de tijd worden verondersteld normaal verdeeld te zijn, met gemiddelde 0 en variantie $\sigma^2$.
 $$ \Delta^2 t_{js} \sim  N(0,\sigma^2)$$
 
 
@@ -215,7 +215,7 @@ De bovengrens van het betrouwbaarheidsinterval (UCL) voor een bepaald jaar $j$ w
 $$ \text {UCL}_j = {DIT}_{j} + 1.96 \bar\sigma_{{DIT}_{j}}$$
 
 
-Het berekenen van de droogte-indicator en de betrouwbaarheid en trend ervan werden uitgevoerd met R versie 4.0.2 [@R2020] en met het softwarepakket INLA [@Rue2009].
+Het berekenen van de droogte-indicator en de betrouwbaarheid en trend ervan werden uitgevoerd met R versie 4.3.2 [@R2024] en met het softwarepakket INLA [@Rue2009].
 
 
 

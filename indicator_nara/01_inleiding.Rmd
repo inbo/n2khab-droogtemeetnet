@@ -163,7 +163,7 @@ De grondwaterstand kan een directe of indirecte invloed hebben op een aantal bal
     - (on)beschikbaarheid van zuurstof
     - invloed op biogeochemische processen die de beschikbaarheid van toxische stoffen bepalen
     
-Een cumulatieve en een absolute droogte-indicatoren toetsen een grondwaterpeil af met een vast referentiepeil.
+Een cumulatieve en een absolute droogte-indicator toetsen een grondwaterpeil af met een vast referentiepeil.
 Ze hebben een ecologische betekenis, omdat ze uitdrukking geven aan mogelijke wijzigingen in één of meer van bovenvermelde balansen die met een peilswijziging gepaard gaan.
 
 Een relatieve indicator [^gwindic] is niet gekoppeld aan een vast referentiepeil. 

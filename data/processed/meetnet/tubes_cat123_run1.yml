@@ -1,9 +1,9 @@
 ..generic:
-  git2rdata: 0.2.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting: loc_code
-  hash: 5588c9b969f0d2356a4b1ea42393d9ea5550358c
+  hash: 06bfacfe9dda8fd52ee9cf83a66ccd16484e1bd1
   data_hash: 9c4494b01dfc7f1eddf5425cf573fc148d05d601
 loc_code:
   class: character
@@ -69,9 +69,9 @@ typegroup_name:
 firstyear:
   class: integer
 lastyear:
-  class: numeric
+  class: integer
 nryears:
-  class: numeric
+  class: integer
 cat:
   class: numeric
 obswell_statecode:

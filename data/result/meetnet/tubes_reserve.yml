@@ -1,10 +1,10 @@
 ..generic:
-  git2rdata: 0.2.1
+  git2rdata: 0.4.0
   optimize: yes
   NA string: NA
   sorting: loc_code
-  hash: 52928c9c9c6a3cbb06fc2009a97eec9e698bc546
-  data_hash: f55e4e4f92f43bd0109ead3fd6c6b891e97f5ae0
+  hash: ad3e57f4263d95813ede7b0a7a9be08b2896bcc9
+  data_hash: 58507c81407ec7122740ab090562df6e1d0dbe4f
 unieknr:
   class: integer
 loc_code:
@@ -62,22 +62,12 @@ typegroup_name:
   - types van vochtig milieu
   - types van zeer nat milieu
   index:
-  - 15
-  - 13
-  - 12
-  - 14
-  - 11
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
   ordered: no
-gew_aantal_meetptn:
-  class: numeric
-geselecteerd:
-  class: numeric
-reserve:
-  class: numeric
-cat:
-  class: character
-selectie:
-  class: numeric
 obswell_statecode:
   class: factor
   labels:
@@ -121,4 +111,14 @@ measuringref_ost:
 tubelength:
   class: numeric
 filterlength:
+  class: numeric
+gew_aantal_meetptn:
+  class: numeric
+geselecteerd:
+  class: numeric
+reserve:
+  class: numeric
+cat:
+  class: character
+selectie:
   class: numeric

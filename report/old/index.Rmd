@@ -3,7 +3,7 @@ title: "Ontwerp van een early-warning meetnet voor droogte in natuurgebieden"
 author: "Jan Wouters, Floris Vanderhaeghe"
 date: '`r paste("Versie",lubridate::now())`'
 link-citations: true
-bibliography: lit_droogtemeetnet.bib
+bibliography: lit-droogtemeetnet.bib
 csl: research-institute-for-nature-and-forest.csl
 linkcolor: link.colour
 citecolor: link.colour
@@ -21,11 +21,11 @@ documentclass: book
 # 1: een volledige (her)berekening zonder data van Google-Drive (indien data ontbreken, worden ze daar wel gedownload), echter voor twee tijdslopende berekeningen wordt bij een herberekening de cache gebruikt; 
 # 0: een herberekening met lokale data, soms van een intermediaire oorsprong (dit veronderstelt een eerdere run obv deze parameter met waarde 1 of hoger), voor twee tijdslopende berekeningen wordt ook de cache gebruikt 
 params:
-  refresh_data: 0
-  refresh_figures: 0
+  refresh_data: 3
+  refresh_figures: 3
   cache: FALSE
-  cache_assigning_tubes_grts: TRUE
-  cache_selection_polygon_cat1A: TRUE
+  cache_assigning_tubes_grts: FALSE
+  cache_selection_polygon_cat1A: FALSE
 output: 
   # bookdown::gitbook: default
     #bookdown::pdf_book: default

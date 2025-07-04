@@ -1,3 +1,1056 @@
+---
+title: "Ontwerp van een early-warning meetnet voor droogte in natuurgebieden"
+author: "Jan Wouters, Floris Vanderhaeghe"
+date: '`r paste("Versie",lubridate::now())`'
+link-citations: true
+bibliography: lit_droogtemeetnet.bib
+csl: research-institute-for-nature-and-forest.csl
+linkcolor: link.colour
+citecolor: link.colour
+urlcolor: link.colour
+geometry: margin=1in
+mainfont: "Calibri"
+fontsize: 11pt
+always_allow_html: yes #mogelijk slechts een tijdelijke verplichting
+# documentclass: "article"
+site: bookdown::bookdown_site
+documentclass: book
+# refresh_data of refresh_figures :
+# 3: alle data worden (her)berekend, er wordt hierbij ook beroep gedaan op bestanden van een Google Drive-map ;  
+# 2: een volledige (her)berekening zonder data van Google-Drive (indien data ontbreken worden ze daar wel gedownload) 
+# 1: een volledige (her)berekening zonder data van Google-Drive (indien data ontbreken, worden ze daar wel gedownload), echter voor twee tijdslopende berekeningen wordt bij een herberekening de cache gebruikt; 
+# 0: een herberekening met lokale data, soms van een intermediaire oorsprong (dit veronderstelt een eerdere run obv deze parameter met waarde 1 of hoger), voor twee tijdslopende berekeningen wordt ook de cache gebruikt 
+params:
+  refresh_data: 0
+  refresh_figures: 0
+  cache: FALSE
+  cache_assigning_tubes_grts: TRUE
+  cache_selection_polygon_cat1A: TRUE
+output: 
+  # bookdown::gitbook: default
+    #bookdown::pdf_book: default
+  # number_sections: TRUE
+  bookdown::html_document2:
+    keep_md: TRUE
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+      smooth_scroll: FALSE
+    toc_depth: 4
+    includes:
+        in_header: header.html
+  bookdown::pdf_document2:
+    fig_caption: yes
+    keep_tex: yes
+    toc: yes
+    toc_depth: 3
+    latex_engine: xelatex
+    number_sections: true
+    includes:
+        in_header: header.tex
+editor_options: 
+  chunk_output_type: console
+---
+
+<!--chapter:end:index.Rmd-->
+
+<!-- #setup -->
+```{r include=FALSE}
+knitr::opts_chunk$set(
+	eval = TRUE,
+	include = TRUE,
+	echo = FALSE,
+	cache = params$cache,
+  cache.path = "cache/",
+	dpi = 300
+)
+
+options(stringsAsFactors = FALSE)
+
+library(stringr)
+library(sf)
+library(units)
+library(git2rdata)
+library(lubridate)
+library(assertthat)
+# install watina-package branch develop_fv
+# remotes::install_github("inbo/watina",
+#                         ref = "develop_fv")
+library(watina)
+# install n2khab-package
+# remotes::install_github("inbo/n2khab",
+#                         build_opts = c("--no-resave-data", "--no-manual"))
+library(n2khab)
+library(raster)
+library(tmap)
+library(tidyverse)
+library(kableExtra)
+library(knitr)
+library(googledrive)
+options(gargle_oauth_email = TRUE)
+library(RSQLite) 
+
+output_format <- ifelse(
+  interactive(),
+  "html",
+  opts_knit$get("rmarkdown.pandoc.to")
+)
+
+#keuzen voor het aanmaken van een document
+if (params$refresh_data <= 1) {
+  cache_selection_polygon_cat1A <- TRUE
+  cache_assigning_tubes_grts <- TRUE
+  }else{
+  cache_selection_polygon_cat1A <- params$cache_selection_polygon_cat1A
+  cache_assigning_tubes_grts <- params$cache_assigning_tubes_grts
+}
+
+if (params$refresh_data == 3) {
+  datapath <- "G:/Mijn Drive/PRJ_Meetnet_Droogte/2_Uitvoering/data"
+  #dir.create(file.path(datapath, "GIS/VoorR/"), recursive = TRUE)
+}
+
+#figuren opnieuw aanmaken of inlezen
+# 2: figuren worden gedownload van Google Drive-map (niet toegepast) ; 1:  de figuren (terug) aangemaakt ; 0: gebruik van figuren uit een lokale map (dit veronderstelt een eerdere run obv deze parameter met waarde 1 of 2)
+if (params$refresh_figures == 3) {
+  figpath <- "G:/Mijn Drive/PRJ_Meetnet_Droogte/2_Uitvoering/figuren"
+}
+
+# lokale gitignored paden aanmaken
+if (!dir.exists("data/local")) dir.create("data/local", recursive = TRUE)
+if (!dir.exists("figures/local")) dir.create("figures/local", recursive = TRUE)
+if (!dir.exists("data/result/meetnet/GIS")) dir.create("data/result/meetnet/GIS", recursive = TRUE)
+
+pdfmaken <- FALSE
+
+# interactieve modus, maar vraagt veel computertijd en genereert ook een mega html-bestand
+# tmap_mode("view")
+# statische modus, dus niet inzoombaar
+tmap_mode("plot")
+```
+
+```{r constanten, include= FALSE}
+#gewenste grootte van het meetnet
+tot_n_tub <- 100
+
+#aantal stratificatielagen
+aantal_strat <- 5
+
+#verdeling meetpunten over de stratificatielagen
+#minaantal_tub_group <- as.integer(tot_n_tub/aantal_strat)
+minaantal_tub_group <- c(11,22,33,34,0)
+
+#kwaliteitscriteria meetreeksen
+  #minimale lengte van de tijdreeks 
+  minlength <- 5
+  #maximale duur van een onderbreking van de tijdreeks 
+  maxgap <- 2
+  #binnen een tijdreeks minimaal aantal meetjaren waarvoor een lg3 kan berekend worden
+  minnryears <- 5
+  
+  #aanvullende criteria om meetreeksen te vergelijken
+  toelaatbare_spreiding_jaren <- 5
+  toelaatbaar_verschil_lengte_tijdreeks <- 5
+
+#zoekstraal rond peilbuizen (buffer) (meter)
+bufferpb <- 3 
+
+#peilbuizen die zeker niet kunnen opgenomen worden, bijv. geen toelating, omdat het te dicht bij een ander geselecteerd punt ligt
+#uitgesloten_tubes <- c("MOSP001", "HALP005", "BUIP027")
+uitgesloten_tubes <- c("HAGP018", "WALP101") #pb van een peilbuiskoppel
+
+```
+
+```{r read-databases, include= FALSE}
+if (params$refresh_data >= 1) {
+  gw_types <- read_scheme_types(lang = "nl") %>%
+      filter(scheme == "GW_05.1_terr") %>%
+      arrange(typegroup) %>%
+      mutate(groupnr = as.integer(str_sub(typegroup, -1))) %>% 
+      dplyr::select(type, groupnr, typegroup_name)
+  output_vc <- write_vc(gw_types, file.path(".","data","processed", "meetnet","gw_types"), sorting = c("type"), strict =  FALSE)
+  
+  types <- read_types(lang = "nl")
+  output_vc <- write_vc(types, file.path(".","data","processed", "meetnet","types"), sorting = c("type"), strict =  FALSE)
+  
+  
+  rm(output_vc)
+}
+```
+
+```{r read-gisdata, include= FALSE}
+#habitatmap_terr_inclbos.gpkg importeren en opslaan in een (lokale) subdirectory van n2khab. Indien het bestand daar niet gevonden wordt, wordt het gedownload van GD. Bij refresh_data-optie=2 wordt het sowieso gedownload (bijv. bij een nieuwere versie)
+if (file.exists(normalizePath(file.path(n2khab::fileman_up("n2khab_data"), "20_processed", "habitatmap_terr", "habitatmap_terr_inclbos.gpkg"))) == FALSE | params$refresh_data == 3 ) {
+  drive_download(drive_get(id = "13mon4WXdWVIAOjGLBts_S2Jl4lqzrCG5"), 
+                 path = normalizePath(file.path(n2khab::fileman_up("n2khab_data"), "20_processed", "habitatmap_terr", "habitatmap_terr_inclbos.gpkg")), 
+                 overwrite = TRUE)
+}
+
+
+if (params$refresh_data >= 1) {
+  habmap_terr <- read_habitatmap_terr(file = "20_processed/habitatmap_terr/habitatmap_terr_inclbos.gpkg")
+  
+  habmap_polygons <- habmap_terr$habitatmap_terr_polygons
+  
+  habmap_types <- habmap_terr$habitatmap_terr_types
+  
+  habmap_types <- habmap_types %>%
+    mutate( polygon_id = as.factor(.data$polygon_id),
+            certain = .data$certain == 1,
+            type = factor(.data$type,
+                          levels = levels(types$type)
+            )
+    )
+  
+  # Verspreiding van de verdrogingsgevoelige typen in Vlaanderen volgens de habitatkaart.
+  habmap_types_gw <- habmap_types %>% 
+    inner_join(gw_types, by = c("type" = "type"))
+  
+  habmap_polygons_gw <- 
+    habmap_polygons %>% 
+    inner_join(habmap_types_gw %>% 
+                 dplyr::select(-code_orig, -source), 
+               by = "polygon_id")
+  habmap_polygons_gw <- sf::st_make_valid(habmap_polygons_gw)
+  
+  #wegschrijven als geopackage
+  st_write(habmap_polygons_gw,
+           dsn = file.path(".","data","local", "habmap_terr_gw.gpkg"),
+           layer = "habitatmap_terr_polygons_gw", 
+           driver = "GPKG",
+           delete_dsn = TRUE)
+  
+  con = dbConnect(SQLite(),
+                  dbname = file.path(".","data","local", "habmap_terr_gw.gpkg")
+                  )
+  
+  dbWriteTable(con, "habitatmap_terr_types_gw", habmap_types_gw)
+  dbDisconnect(con)
+  
+  
+  #GRTS-data
+  
+  raster_meetnet_poly <- read_GRTSmh_diffres(level = 8, polygon = TRUE)
+  raster_meetnet_poly <- raster_meetnet_poly %>% 
+    rename(rasterid =  value)
+  raster_meetnet_poly <- sf::st_make_valid(raster_meetnet_poly) 
+  
+  #wegschrijven van dit grid
+  st_write(raster_meetnet_poly,
+           dsn = file.path(".","data","local", "raster_meetnet_poly.gpkg"),
+           layer = "raster_meetnet_poly", 
+           driver = "GPKG",
+           delete_dsn = TRUE)
+  
+  
+  #overlay maken hab-kaart en GRTS-rooster
+  habmap_gw_raster_overlay <- habmap_polygons_gw %>% 
+    st_intersection(raster_meetnet_poly)
+  
+  habmap_gw_raster_overlay <- habmap_gw_raster_overlay %>% 
+      mutate(opp = as.integer(st_area(habmap_gw_raster_overlay))) 
+  
+  #wegschrijven van deze intersectie
+  st_write(habmap_gw_raster_overlay,
+           dsn = file.path(".","data","local", "habmap_gw_raster_overlay.gpkg"),
+           layer = "habmap_gw_raster_overlay", 
+           driver = "GPKG",
+           delete_dsn = TRUE)
+  
+  
+  #inlezen grts-raster level 0 (hoogste resolutie = kleinste gridcelgrootte)
+  grts_level0 <- read_GRTSmh(brick = TRUE) %>% 
+    raster::subset(1)
+  
+  #inlezen grts-raster level 8 (resolutie = raster_meetnet_poly), het heeft een gridgrootte van 8192 m, let wel de rastercelgrootte is ook hier 32 bij 32m, dus het aantal rastercellen = grts-raster level 0. 
+  grts_level8 <- read_GRTSmh(brick = TRUE) %>% 
+    raster::subset(9)
+  
+  #±inlezen grts-raster level 5 : voor het selecteren van habitatvlekken
+  grts_level5 <- read_GRTSmh(brick = TRUE) %>% 
+    raster::subset(6)
+  
+  writeRaster(grts_level8,
+              filename = file.path(".","data","local", "grts_level8.tif"),
+              format = "GTiff", 
+              datatype = "INT4S",
+              overwrite = TRUE)
+  
+  writeRaster(grts_level5,
+              filename = file.path(".","data","local", "grts_level5.tif"),
+              format = "GTiff", 
+              datatype = "INT4S",
+              overwrite = TRUE)
+
+    writeRaster(grts_level0,
+              filename = file.path(".","data","local", "grts_level0.tif"),
+              format = "GTiff", 
+              datatype = "INT4S",
+              overwrite = TRUE)  
+}
+```
+
+
+```{r read-watina-data, include= FALSE}
+if (params$refresh_data >= 1) {
+  watina <- connect_watina()
+  tubes_hab <- get_locs(watina, mask = habmap_gw_raster_overlay, join_mask = TRUE,
+                        buffer = bufferpb, loc_type = "P", loc_validity = c("VLD", "ENT"), 
+                        collect = TRUE) %>% as_tibble()
+  tubes_hab_basis <-   tubes_hab #interne backup
+#toevoegen van pb gebruikt voor grondwaterstandstandsindicator die gelegen zijn in een gw-afhankelijk type
+  vmm_pb <- read_csv(file.path(getwd(), "data","interim","meetnet","vmm_indc.csv")) %>% 
+    rename(loc_code = FID_stand,
+            polygon_id = plygn_d,
+            typegroup_name = typgrp_) %>% 
+    mutate(area_code = "VMM",
+            area_name = "Grondwaterstandindicator") %>%
+    inner_join(habmap_gw_raster_overlay %>% st_drop_geometry() %>%  
+                dplyr::select(polygon_id, type, groupnr, rasterid, opp), by = c("polygon_id", "groupnr", "type")) %>% as_tibble()
+
+  tubes_hab <- tubes_hab %>% 
+    full_join(vmm_pb %>% dplyr::select(loc_code, area_code, area_name, x, y, phab, type, groupnr, typegroup_name, rasterid, opp, polygon_id))
+  
+  tubes_hab <- tubes_hab %>% 
+    mutate(polygon_id = as.character(polygon_id),
+           loc_validitycode = factor(loc_validitycode),
+           loc_validity = factor(loc_validity),
+           loc_typecode = factor(loc_typecode),
+           loc_typename = factor(loc_typename),
+           obswell_statecode = factor(obswell_statecode),
+           obswell_state = factor(obswell_state),
+           typegroup_name = factor(typegroup_name)
+           ) 
+  #beperken van peilbuizen tot de rastercel waar ze effectief in liggen. Door het gebruik van een buffer is het immers mogelijk dat een peilbuis in twee of meer cellen komt te liggen.
+  tubes_hab_sf <- as_points(tubes_hab)
+  
+  #overlay van peilbuizen met het raster
+  tubes_hab_gw_raster_overlay <- tubes_hab_sf %>% 
+    distinct(loc_code, x, y) %>% 
+    st_intersection(raster_meetnet_poly)
+  
+  tubes_hab <- tubes_hab %>% 
+    semi_join(tubes_hab_gw_raster_overlay, by = c("loc_code","rasterid"))
+  
+  #save tubes_hab as a git2rdata-object
+  tubes_hab <- tubes_hab %>% 
+    arrange(loc_code, polygon_id, rasterid, type)
+  
+  output_vc <- write_vc(tubes_hab, file.path(".","data","processed","meetnet","tubes_hab"), 
+                        sorting = c("loc_code", "polygon_id", "rasterid", "type" ),
+                        strict =  FALSE)
+  rm(output_vc)
+  
+  tubes_xg3 <- tubes_hab %>% 
+    get_xg3(watina, startyear = year(now()) - 20, endyear = year(now()), 
+            vert_crs = "local", truncated =  TRUE, collect = TRUE)
+
+#toevoegen van pb gebruikt voor grondwaterstandstandsindicator die gelegen zijn in een gw-afhankelijk type
+  tubes_xg3_vmm <- data.frame(loc_code = rep(tubes_hab %>% 
+                                       filter(area_code == "VMM") %>% 
+                                       distinct(loc_code) %>% 
+                                       dplyr::pull(loc_code),times = 31), 
+                              hydroyear = seq(from = 2016 - 30, to = 2016),
+                              lg3_lcl = rep(-1, 31)) %>% as_tibble() 
+  
+  tubes_xg3 <- bind_rows(tubes_xg3, tubes_xg3_vmm)  
+  #oplossen van UTF-probleem: strings worden in inbo-SQL-databanken opgeslagen in UTF-16, terwijl hier gewerkt wordt met UTF-8. Dit geeft een probleem bij de kable-functie
+  
+  #tubes_xg3 <- mutate_if(tubes_xg3, is.character, iconv, to = "UTF-8")
+  
+  tubes_xg3 <- tubes_xg3 %>% 
+    arrange(loc_code, hydroyear)
+  
+  output_vc <- write_vc(tubes_xg3, file.path(".","data","processed", "meetnet","tubes_xg3"), 
+                        sorting = c("loc_code", "hydroyear"),
+                        strict =  FALSE, root = ".")
+  
+  
+  DBI::dbDisconnect(watina)
+  #volgende watina-functie werkt ook zonder databankconnectie, maar omdat deze op sommige pc's niet stabiel werkt, worden de data hier alvast lokaal weggeschreven.
+    
+  filter_xg3_lok <- function(data,
+                             xg3_type) {
+    
+    assertthat::assert_that(all(c("loc_code", "hydroyear") %in% colnames(data)) &
+                              any(grepl("g3", colnames(data))),
+                            msg = "data does not have the necessary 'loc_code', 'hydroyear' and XG3 columns.")
+    
+    assertthat::assert_that(("L" %in% xg3_type & any(grepl("lg3", colnames(data)))) |
+                              ("H" %in% xg3_type & any(grepl("hg3", colnames(data)))) |
+                              ("V" %in% xg3_type & any(grepl("vg3", colnames(data)))),
+                            msg = paste("xg3_type is set to",
+                                        dput(xg3_type),
+                                        "but at least one XG3 type is missing in data.")
+    )
+    
+    xg3_filtered <-
+      data %>%
+      dplyr::select(.data$loc_code,
+             .data$hydroyear,
+             if ("L" %in% xg3_type) contains("lg"),
+             if ("H" %in% xg3_type) contains("hg"),
+             if ("V" %in% xg3_type) contains("vg")
+      ) %>%
+      arrange(.data$loc_code,
+              .data$hydroyear)
+    
+    return(xg3_filtered)
+  }
+  
+  eval_xg3_series_lok <- function(data,
+                                  xg3_type = c("L", "H", "V"),
+                                  max_gap,
+                                  min_dur){
+    if (missing(xg3_type)) {
+      xg3_type <- match.arg(xg3_type)} else {
+        assertthat::assert_that(all(xg3_type %in%
+                                      c("L", "H", "V")),
+                                msg = "You specified at least one unknown xg3_type.")
+      }
+    series_memberyrs <-
+      data %>%
+      extract_xg3_series(xg3_type = xg3_type,
+                         max_gap = max_gap,
+                         min_dur = min_dur)
+    
+    # summarize series properties:
+    tmpf <- tempfile()
+    file.create(tmpf)
+    capture.output({# to suppress the many disc_ks_test() messages
+      xg3_series_props <-
+        series_memberyrs %>%
+        group_by(.data$loc_code,
+                 .data$xg3_variable,
+                 .data$series) %>%
+        summarise(
+          ser_length = first(.data$series_length),
+          ser_nryears = n(),
+          ser_rel_nryears = .data$ser_nryears / .data$ser_length,
+          ser_firstyear = min(.data$hydroyear),
+          ser_lastyear = max(.data$hydroyear)  
+          #   ser_pval_uniform = disc_ks_test(.data$hydroyear,
+          #                                   ecdf(seq(.data$ser_firstyear,
+          #                                            .data$ser_lastyear)),
+          #                                   exact = TRUE) %>%
+          #     .$p.value
+        ) %>%
+        ungroup
+    },
+    file = tmpf)
+    
+    # calculation of standard errors
+    
+    xg3_filtered <-
+      data %>%
+      filter_xg3_lok(xg3_type = xg3_type)
+    
+    if (inherits(xg3_filtered, "tbl_lazy")) {
+      xg3_filtered <- collect(xg3_filtered)
+    }
+    
+    xg3_series_values <-
+      xg3_filtered %>%
+      gather(key = "xg3_variable",
+             value = "value",
+             -.data$loc_code,
+             -.data$hydroyear) %>%
+      inner_join(
+        series_memberyrs,
+        by = c("loc_code", "hydroyear", "xg3_variable")
+      ) %>%
+      group_by(.data$loc_code,
+               .data$xg3_variable,
+               .data$series)
+    
+    xg3_series_se <-
+      xg3_series_values %>%
+      summarise(
+        ser_mean = mean(.data$value),
+        ser_sd = sd(.data$value),
+        ser_se_6y = (var(.data$value) / 6 *
+                       (1 - n() / first(.data$series_length))) %>%
+          sqrt,
+        ser_rel_sd_lcl = ifelse(str_detect(first(.data$xg3_variable), "_lcl"),
+                                .data$ser_sd / abs(.data$ser_mean),
+                                NA),
+        ser_rel_se_6y_lcl = ifelse(str_detect(
+          first(.data$xg3_variable), "_lcl"),
+          .data$ser_se_6y / abs(.data$ser_mean),
+          NA)
+      ) %>%
+      ungroup
+    
+    # put it all together...
+    xg3_series_props <-
+      xg3_series_props %>%
+      left_join(xg3_series_se,
+                by = c("loc_code",
+                       "xg3_variable",
+                       "series")
+      )  
+    return(xg3_series_props)
+  }  
+  # debugonce("extract_xg3_series")
+  # test <- tubes_xg3_basis %>%
+  #   eval_xg3_series_lok(xg3_type = c("L"),
+  #                       max_gap = maxgap,
+  #                       min_dur = minlength)
+  
+  tubes_lg3_eval <- tubes_xg3 %>%
+    eval_xg3_series_lok(xg3_type = c("L"),
+                        max_gap = maxgap,
+                        min_dur = minlength) %>% as_tibble()
+  
+  tubes_lgl_eval <- tubes_lg3_eval %>%
+    filter(ser_nryears >= minnryears)
+  
+  output_vc <- write_vc(tubes_lgl_eval, file.path(".","data","processed", "meetnet","tubes_lgl_eval"), 
+                        sorting = c("loc_code", "ser_firstyear"), 
+                        strict =  FALSE, root = ".")
+  
+  rm(output_vc)
+}
+```
+
+```{r inlezen-lokaledata, eval=TRUE, include = TRUE, echo=FALSE, warning=FALSE}
+#inlezen van lokale data (alleen van toepassing bij params$refresh_data-optie = 0)
+if (params$refresh_data < 1) {
+  gw_types <- read_vc("gw_types", file.path(".","data","processed", "meetnet"))
+  types <- read_vc("types", file.path(".","data","processed", "meetnet"))
+  habmap_polygons_gw <- read_sf(file.path(".","data","local", "habmap_terr_gw.gpkg"),
+                                 "habitatmap_terr_polygons_gw")
+  
+  habmap_types_gw <- suppressWarnings(read_sf(file.path(".","data","local", "habmap_terr_gw.gpkg"),
+  
+                                              "habitatmap_terr_types_gw"))
+   
+  raster_meetnet_poly <- suppressWarnings(read_sf(file.path(".","data","local", "raster_meetnet_poly.gpkg"), "raster_meetnet_poly"))
+   
+  habmap_gw_raster_overlay <- suppressWarnings(read_sf(file.path(".","data","local", "habmap_gw_raster_overlay.gpkg"), "habmap_gw_raster_overlay"))
+}
+```
+
+<!--chapter:end:00_setup.Rmd-->
+
+# Inleiding
+
+> Het basisidee van het early-warning meetnet droogte is om in natuurgebieden een vooraf gekozen aantal meetpunten zo goed mogelijk ruimtelijk gebalanceerd te selecteren, rekening houdende met mogelijke verschillen in het gedrag van het grond/oppervlaktewaterpeil t.a.v. een neerslagtekort. Voor deze meetpunten kan op basis van actuele informatie een indicator (cfr. droogte-indicator) worden berekend.
+
+Het project omhelst : 
+
+* uitwerking van een methodiek die een ruimtelijk gebalanceerde selectie van actuele en potentiële meetlocaties mogelijk maakt 
+* bepalen van referentiewaarden voor de actuele meetlocaties
+
+Met natuurgebieden worden hier alle locaties met grondwaterafhankelijke habitattypes en rbb's bedoeld, gelegen binnen of buiten het Natura 2000 netwerk. In overeenstemming met het meetnet natuurlijk milieu (MNM) voor de milieudruk 'verdroging via grondwater' worden volgende habitattypen en rbb's als grondwaterafhankelijk beschouwd (tabel \@ref(tab:gw-typen)). Hierna worden deze typen afgekort tot gaHT. 
+
+```{r gw-typen, eval=TRUE, include = TRUE, echo=FALSE, warning=FALSE}
+kobj <- kable(gw_types %>% 
+        dplyr::select(type, groupnr) %>% 
+        inner_join(read_namelist(lang = "nl") %>% 
+                     dplyr::select(code, shortname),
+                   by = c("type" = "code")) %>% 
+        arrange(type) %>% 
+        dplyr::select(1,3,2) %>% 
+        rename("habitat(sub)type of rbb" = type,
+               "(verkorte) naam" = shortname,
+               "GT-groep: nummer" = groupnr
+                          ),
+
+      caption =  "grondwaterafhankelijke habitattypen en rbb's") 
+if (pdfmaken == TRUE) {
+  kobj
+} else {
+  kobj   %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = F,
+                position = "left",
+                font_size = 12,
+                fixed_thead = T) %>%
+  #row_spec(0, angle = -45)  %>% #fixeer veldnamen
+  scroll_box(height = "200px")
+}
+```
+  
+
+Een min of meer ruimtelijk gebalanceerde set van bestaande meetlocaties maakt het mogelijk om conclusies te trekken die benaderend representatief zijn voor heel het studiegebied.
+Via deze benadering wordt ook een goede synergie bekomen met de implementatie van de zg. 'overgangsfase' van het grondwatermeetnet in MNM [@vanderhaeghe_meetnetten_2018: hoofdstuk 6].
+
+Er wordt met dit meetnet niet beoogd om specifiek voor elk gaHT te bepalen of het aan droogte onderhevig is. Het meetnet wil een globale uitspraak faciliteren.
+Hierbij achten we het belangrijk om rekening te houden met de mogelijke verschillen in responstijd ('hoe snel laat een neerslagtekort zich voelen in een wijziging van het grondwaterpeil') op droogte. De responstijd is onder meer afhankelijk van de landschappelijke positie. Vegetaties die voorkomen in lokaal-grondwatergevoede systemen zullen sneller een droogte gewaar worden dan vegetaties die gebonden zijn aan (regionale) systemen met een permanente aanvoer van grondwater.
+We veronderstellen hierbij dat er een relatie bestaat tussen het hydrologisch regime en de responstijd: permanent grondwatergevoede systemen reageren trager dan systemen met een tijdelijke of zwakke grondwatervoeding. 
+
+We vertrekken hiervoor van de 5-delige indeling in grondwatertypegroepen (GT-groep) die toegepast wordt in het MNM (tabel \@ref(tab:GTgroepen)). In de vorige tabel \@ref(tab:gw-typen)) is weergegeven tot welke GT-groep een gaHT gerekend wordt.
+```{r GTgroepen}
+gw_types_groups <- gw_types %>%
+  distinct(groupnr, typegroup_name) %>% 
+  inner_join(data.frame(groupnr = seq(1:5), gewenst_aantal_locaties = minaantal_tub_group), by = "groupnr") %>% 
+  arrange(groupnr) %>% 
+  rename("GT-groep: nummer" = groupnr,
+         "GT-groep: naam" = typegroup_name,
+         "Gewenst aantal meetlocaties" = gewenst_aantal_locaties)
+
+kobj <- kable(gw_types_groups %>%  select(1:2), 
+      caption = "Grondwatertype-groepen") 
+
+if (pdfmaken == TRUE) {
+  kobj
+} else {
+  kobj   %>% 
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                  full_width = TRUE, 
+                  position = "left",
+                  font_size = 12,
+                  fixed_thead = T) 
+    #row_spec(0, angle = -45)  %>% #fixeer veldnamen
+     # scroll_box(height = "200px") 
+}
+```
+    
+
+De GT-groepen lenen zich heel goed om een stratificatie uit te voeren op basis van de verwachte responssnelheid van een locatie op droogte. 
+De permanent gevoede locaties (GT-groep 1) zullen naar verwachting trager reageren dan de tijdelijk of zwak gevoede locaties. 
+GT-groep 5 bundelt grondwaterafhankelijke HT die zodanig breed gedefinieerd zijn dat ze op sommige locaties grondwatergevoed zijn, maar soms tot meestal niet.
+Het voordeel van deze groep is dat ze vermoedelijk het snelst op droogte zal reageren.
+Ze houdt echter ook nadelen in, nl. dat je bij het uitzetten van een nieuw punt niet op voorhand weet of het wel grondwaterafhankelijk is en dat sommige typen heel variabel zijn m.b.t. het grondwaterregime.
+We oordelen dat deze nadelen groter zijn dan het mogelijke voordeel van een snelle signalering.
+De GT-groep 5 wordt daarom niet meegenomen in de verdere analyse.
+
+Door een stratificatie over de GT-groepen toe te passen kan een balans worden verzekerd. 
+Een stratificatie laat toe om een globale uitspraak te doen.
+We raden echter ook aan in de beoordeling elke GT-groep apart mee te nemen, omdat ze verschillende signalen zullen geven. 
+
+```{r habitat selection, include=FALSE}
+
+## Verspreiding van de verdrogingsgevoelige typen in Vlaanderen volgens de habitatkaart.
+# if (file.exists(file.path(".","data","local", "habmap_terr_gw.gpkg")) == FALSE | params$refresh_data == 2) {
+#     drive_download(drive_get(id = "1nxnpfE3Eh4eCiM2VinGYMJE55qD4Az1c"), 
+#                    path = file.path(".","data","local", "habmap_terr_gw.gpkg"), overwrite = TRUE)
+# }
+
+habmap_polygons_gw <- habmap_polygons_gw %>%
+  mutate(polygon_id = factor(.data$polygon_id),
+         type = factor(.data$type),
+         typegroup_name = factor(.data$typegroup_name)
+         )
+```
+
+<!--chapter:end:01_inleiding.Rmd-->
+
+# Methode
+
+## Ontwerp van het meetnet
+
+### Ruimtelijke selectie van rastercellen {#ruimte-sel-raster}
+
+Idealiter liggen de meetlocaties ruimtelijk gebalanceerd, omdat dit de beste garantie biedt dat de gebeurtenissen die zich op deze locaties voordoen, representatief zijn voor het hele gebied.   
+Men kan een ruimtelijk gebalanceerde set opbouwen door de verspreiding van de GT-groepen over een fijn GRTS-raster[^1] te leggen. 
+
+[^1]: GRTS-design = Generalized Random Tessellation Stratified design.
+Een GRTS-raster is hiervoor de basis.
+
+Een GRTS-raster is een raster, waarbij een willekeurig gekozen subset van opeenvolgende genummerde punten steeds een ruimtelijk gebalanceerde set vormen. 
+Kiezen we een willekeurig nummer en vormen we een reeks opeenvolgende punten ter grootte van ons vooraf gekozen aantal, dan verkrijgen we steeds een goed ruimtelijk gebalanceerde set.  
+Kees denkt dan wel dat hij klaar is, het is jammergenoeg niet zo eenvoudig.    
+
+1. De kans dat op een dergelijk punt zich een bestaand grondwatermeetpunt bevindt, is namelijk weinig realistisch. 
+Het karakteriseren van een nieuwe locatie, zodat het kan ingezet worden in het meetnet, vergt verschillende jaren grondwatermetingen.
+1. We hebben ook geen controle over de verdeling van de punten over de verschillende grondwatertypegroepen, die verschillend op droogte kunnen reageren.   
+
+We kunnen om deze redenen geen zuiver ruimtelijk gebalanceerde set opbouwen. 
+
+De drie hoofdfactoren waar we bij het ontwerp mee rekening houden, zijn:
+
+- We willen zoveel mogelijk een ruimtelijk gebalanceerde keuze. 
+De keuze van de grootte van een rastercel en bijgevolg van het aantal cellen, is hierbij sturend. 
+Deze wordt bepaald door de ingeschatte grootte van het meetnet en door de trefkans op een (liefst actueel) meetpunt van grondwaterpeilen. 
+Hoe kleiner de celgrootte, hoe beter de ruimtelijke balans kan zijn, omdat men minder vrij is om een locatie te kiezen, maar ook hoe kleiner de kans is om daar een geschikt meetpunt aan te treffen. 
+Hier is het dus wat zoeken naar een goede maat. 
+Concreet:  
+    - We maken gebruik van een set gekoppelde GRTS-rasters op een verschillende resolutie [@vanderhaeghe_grtsmh_diffres_2019] die zijn afgeleid van het basisraster 'GRTSmaster_habitats' [@onkelinx_grts_2019].
+Deze rasters worden gebruikt in de meetnetten natuurlijk milieu en in het meetnet biotische habitatkwaliteit.
+    - Voor de ruimtelijke spreiding van meetpunten in het meetnet kiezen we voor rastercellen met resolutie 8 km (8192 m, level 8).
+In totaal zijn er 262 cellen in Vlaanderen, waarvan 149 volledig in Vlaanderen liggen.
+    - Het gewenste totaal aantal meetpunten = `r tot_n_tub `  
+
+- We willen daarenboven ook gestratificeerd werken volgens de GT-groepsindeling, om zo te verzekeren dat elke GT-groep voldoende gemonitord zal worden.
+We geven niet alle GT-groepen een even groot gewicht. Vegetatietypen van GT-klasse 5 worden niet meegenomen. 
+Van deze GT-klasse is immers de grondwaterafhankelijkheid plaatsgebonden en (soms heel) variabel (zie hoofdstuk \@ref(inleiding)).
+De twee natste GT-klassen krijgen een lager gewicht toegemeten, omdat deze klassen vermoedelijk het traagst een droogte-signaal zullen geven. 
+
+Concreet:
+
+- Het aantal stratificatielagen  = `r aantal_strat - 1`
+- De verdeling van het aantal meetpunten per laag is gegeven in tabel \@ref(tab:GTgroepen-verdeling-over-strata): 
+```{r GTgroepen-verdeling-over-strata}
+kobj <- kable(gw_types_groups %>% arrange(`GT-groep: nummer`), 
+      caption = "Verdeling van het gewenst aantal meetlocaties over de grondwatertype-groepen") 
+
+if (pdfmaken == TRUE) {
+  kobj
+} else {
+  kobj   %>% 
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), 
+                  full_width = TRUE, 
+                  position = "left",
+                  font_size = 12,
+                  fixed_thead = T) 
+    #row_spec(0, angle = -45)  %>% #fixeer veldnamen
+     # scroll_box(height = "200px") 
+}
+```
+- De keuze van een cel wordt mee bepaald door de aanwezigheid van een GT-groep. 
+Niet elke cel is even belangrijk voor de monitoring van een GT-groep, want de oppervlakte van gaHT verschilt van cel tot cel. 
+Het heeft bijvoorbeeld geen zin om voor een GT-groep in een rastercel een meetpunt te voorzien indien die groep daar niet voorkomt.  
+De rastercellen zullen dus **niet** obv GRTS geselecteerd worden, maar in verhouding tot de relatieve oppervlakte van een GT-groep dat het bevat. 
+Concreet:
+    - Als maat voor de relatieve oppervlakte kan **de gemiddelde oppervlakte van een GT-groep per gewenst meetpunt** gebruikt worden. 
+Stel dat van een bepaalde GT-groep er 100 ha in Vlaanderen voorkomt en dat we die groep willen monitoren met 10 meetpunten. 
+Cellen zullen voor die GT-groep dan een aantal meetpunten toegewezen krijgen a rato van één meetpunt per 10 ha van de bepaalde GT-groep _in die cel_. 
+
+In de praktijk verloopt de toewijzing iets ingewikkelder, omdat het resulterend aantal een geheel getal moet zijn en er bij het afronden hierdoor meetpunten kunnen wegvallen. 
+Stel bijvoorbeeld dat die 100 ha verspreid liggen over 40 cellen, dan is er maar gemiddeld 2.5 ha per cel aanwezig, terwijl er 10 ha nodig is voor een meetpunt, indien er 10 gewenst zijn. 
+Er zou dan aan geen enkele cel een meetpunt kunnen toegewezen worden.
+
+Om dit euvel te ondervangen, werd een iteratie uitgevoerd. 
+Na de eerste ronde worden per GT-groep al de bekomen aantallen opgeteld en vergeleken met het gewenste aantal. 
+Is dat aantal te klein, dan wordt de benodigde oppervlakte een klein beetje verkleind (bijv. 9.9 ha per meetpunt) en wordt de berekening opnieuw uitgevoerd en het totaal aantal gecheckt.
+Dit gaat door tot wanneer het gewenst aantal bereikt wordt.
+De variatie in oppervlakten bepaalt de grootte van de verkleining. 
+Is de sprong voldoende klein, zal het bekomen aantal hooguit lichtjes hoger dan het gewenste aantal uitvallen.
+
+Figuur \@ref(fig:workflow-rastercellen) geeft een schematisch overzicht van de gevolgde werkgang.
+
+(ref:workflow-rastercellen) werkgang selectie rastercellen. Blauw gekleurde cirkels zijn brongegevens. De rode gekleurde zijn genereerde data. Het groen gekleurde is een (tussentijds) output-resultaat. De gele vakken stellen handelingen/bewerkingen voor.
+
+```{r workflow-rastercellen, fig.cap='(ref:workflow-rastercellen)'}
+if (pdfmaken == TRUE) {
+  include_graphics(path = file.path("figures", "meetnet", "workflow_rasterselectie_pdf.jpg"))  
+} else {
+  include_graphics(path = file.path("figures", "meetnet", "workflow_rasterselectie.png"))
+}
+```
+
+
+
+### Selectie van de meetpunten
+
+In dit deel bespreken we hoe we aan de gekozen rastercellen effectief meetpunten kunnen koppelen. 
+Een meetpunt is een locatie waar het (freatisch) grondwaterpeil periodiek gemeten wordt (of zal worden).
+In de praktijk gebeurt dat in een piëzometer of peilbuis.[^2]
+
+Elke locatie die tot één van de GT-groepen behoort, kan in principe in het meetnet opgenomen worden.
+Locaties waarvan het onduidelijk is tot welke GT-groep ze behoren worden niet meegenomen. 
+Dit kunnen locaties zijn die op grens liggen van habitatvlekken die tot een verschillende GT-groep behoren of het zijn locaties die in een habitatvlek gelegen zijn dat gekarteerd is als een complex van vegetaties die tot verschillende GT-groepen behoren.
+In de praktijk wordt deze voorwaarde toegepast door enkel die habitatvlekken en/of peilbuizen te selecteren die voor 50% of meer toegewezen kunnen worden aan eenzelfde GT-groep en die op minstens `r bufferpb` m afstand liggen van een andere GT-groep.
+
+[^2]: Normaal gesproken duidt in dit rapport de term meetpunt op de locatie eerder dan op het meetinstrument (peilbuis of piëzometer), maar soms slaat het op beide. Met peilbuis wordt in dit document ook een piëzometer bedoeld. 
+
+Figuur \@ref(fig:workflow-selectiepb-part1) geeft een schematisch overzicht van de werkgang die gevolgd werd om na te gaan welke peilbuizen beschikbaar zijn.
+
+(ref:workflow-selectiepb1) werkgang selectie rastercellen. Voor de betekenis van de symbolen zie figuur \@ref(fig:workflow-rastercellen).
+
+```{r workflow-selectiepb-part1, fig.cap='(ref:workflow-selectiepb1)'}
+if (pdfmaken == TRUE) {
+  include_graphics(path = file.path(".","figures", "meetnet", 
+                                    "workflow_pbselectie_part1_pdf.jpg"))
+} else {
+  include_graphics(path = file.path("figures", "meetnet", "workflow_pbselectie_part1.png"))
+}
+```
+
+
+#### Indeling van rastercellen in categorieën {#indeling-cat}
+
+We willen de toewijzing van een meetpunt aan een rastercel afhankelijk stellen van de verhouding tussen het aantal meetpunten dat voor een rastercel gezocht wordt (zie hoger) en het aantal effectief beschikbare meetpunten met een peilbuis. 
+
+We willen er ook rekening mee houden dat een beschikbaar meetpunt niet noodzakelijk ook een geschikt meetpunt is.
+
+
+Afhankelijk van die verhoudingen worden de _rastercellen_ **per GT-groep** eerst in categorieën ingedeeld.
+Deze opdeling is een hulp bij het ontwerp, omdat elke categorie een specifieke behandeling vraagt.
+
+_A. Alle meetpunten met een peilbuis zijn kwalitatief gelijkwaardig_
+
+We stellen eerst voor de eenvoud dat alle beschikbare meetpunten even geschikt zijn: er wordt bvb. geen onderscheid gemaakt tussen een lang en een kort bemeten meetpunt. 
+Vergelijken we dan de vraag, het gewenste aantal meetpunten per rastercel (= G), met het aanbod van meetpunten met een peilbuis (of kortweg het aantal peilBuizen = B) dan kunnen de rastercellen in drie categorieën verdeeld worden. 
+De categorieën sluiten elkaar mutueel uit.
+
+- Cat. 1: de vraag is groter dan het aanbod (G > B) 
+
+  Er zijn geen meetpunten met een peilbuis of er is een gebrek aan.
+
+- Cat. 2: de vraag is gelijk aan het aanbod (G = B) 
+
+  Het aantal beschikbare meetpunten met een peilbuis stemt juist overeen met het aantal dat gezocht wordt.
+
+- Cat. 3: de vraag is kleiner dan het aanbod (G < B) 
+
+  Er is een overschot aan meetpunten met een peilbuis.
+
+**Categorie 1**
+
+Vanuit het oogpunt van een meetnetontwerp kan een rastercel van categorie 1 over twee soorten meetpunten beschikken. 
+Je hebt meetpunten zonder peilbuis en mogelijk ook meetpunten met een peilbuis. 
+Specifiek voor deze categorie is dat we op zoek willen gaan naar nieuwe meetpunten. 
+Voor de uitwerking van deze selectie van potentiële geschikte habitatvlekken: zie paragraaf \@ref(sel-pot-habvlek).
+
+Alle meetpunten die reeds een peilbuis hebben, worden zonder verdere analyse geselecteerd.
+
+Het gaat hier vooral over een tijdsinvestering: dergelijke meetpunten zullen pas na enkele jaren effectief kunnen meedraaien in het meetnet. 
+In afwachting daarvan zal het meetnet dus met een kleiner aantal meetpunten moeten functioneren.
+
+**Categorie 2**
+
+De rastercellen van deze categorie zijn voor het meetnetontwerp een zegen.
+Het aantal locaties met peilbuizen volstaat juist om te voldoen aan de vraag.
+Alle locaties kunnen zonder verdere analyse in het meetnet worden opgenomen.
+
+**Categorie 3**
+
+Voor een rastercel van categorie 3 stelt er zich een 'luxe-probleem':
+er is namelijk een overschot aan meetpunten met een peilbuis.
+Uit dit aanbod moet nog het gewenste aantal meetpunten gekozen worden. 
+Hiervoor verwijzen we naar paragraaf \@ref(sel-habvlek).
+
+
+_B. De meetpunten met een peilbuis zijn kwalitatief niet gelijkwaardig_
+
+In werkelijkheid zijn niet alle meetpunten even geschikt. 
+
+De bovenstaande categorie-indeling blijft weliswaar behouden, maar er zijn verschillen t.a.v. de selectie van meetpunten en het gebruik ervan in het meetnet.
+
+We noemen een meetpunt geschikt, indien er hiervoor een droogte-indicator kan berekend worden.
+Het berekenen van deze indicator op een meetpunt vergt een ononderbroken meetreeks van _dagelijkse_ peilen en dit over een stabiele, langdurige periode (een paar tiental jaren) . 
+De beschikbare terreinwaarnemingen in Watina zijn hiervoor meestal ontoereikend. 
+Door middel van een tijdreeksanalyse (zie \@ref(tijdreeksanalyse)) kunnen de tijdreeksen met modelgegevens aangevuld worden, waardoor het wel mogelijk wordt om de indicator te berekenen.
+
+Het zal bijgevolg op basis van de tijdreeksanalyse zijn dat meetpunten als geschikt (een tijdsmodel is mogelijk) of niet geschikt (een tijdsmodel is niet mogelijk) zullen bevonden worden.
+Deze evaluatie willen we vertalen in het gebruik van het meetpunt in het meetnet.
+Een geschikt meetpunt kan op basis van de data onmiddellijk in het meetnet worden opgenomen.
+Een niet geschikt meetpunt daarentegen kan dat pas na verloop van tijd, nl. wanneer er voldoende data zijn die toelaten een betrouwbaar tijdreeksmodel (zie onder) te bouwen.
+
+Het vergt veel tijd om op alle beschikbare meetpunten een tijdreeksanalyse uit te voeren.
+We willen dit beperken tot de *relatief (beschouwd op het niveau van combinatie rastercel en GT-groep)* kwalitatief beste meetreeksen. 
+Dit is een selectie, maar we leggen geen absolute minimum-criteria op. 
+Dit wil zeggen dat indien bijvoorbeeld in een rastercel voor een bepaalde GT-groep de langste tijdreeks één jaar is, dan zal deze peilbuis toch voor een tijdreeksanalyse geselecteerd kunnen worden. 
+De kans wordt uiteraard kleiner dat met deze beperkte data een betrouwbaar model kan gebouwd worden.
+
+We delen de meetpunten daarom op in een aantal kwaliteitsklassen op basis van volgende **[basiskwaliteitscriteria]{#basiskwaliteitscriteria}** :
+
+(@) De meetpunten hebben vanaf 2000 voor minstens één jaar een goede tijdreeks[^3], die toelaat een zogenaamde lg3-waarde[^4] te berekenen.
+
+(@) Meetpunten met een _recente_ kwalitatief goede tijdreeks primeren boven meetpunten met een oudere tijdreeks. 
+
+  De meetpunten worden hierbij gerangschikt volgens aflopend jaartal (eindjaar) van de laatst beschikbare kwalitatief goede tijdreeks. 
+
+  Meetpunten worden als evenwaardig beschouwd als het verschil niet groter dan **`r toelaatbare_spreiding_jaren`** jaar is.
+
+(@) Meetpunten met een _langere_ tijdreeks, t.t.z. een groter aantal kwalitatief goede meetjaren, krijgen ook een hogere prioriteit.
+
+  Meetpunten waarvan het aantal niet meer dan **`r toelaatbaar_verschil_lengte_tijdreeks`** jaar van elkaar verschilt, worden als evenwaardig beschouwd.
+
+(@) Een meetpunt met een lange tijdreeks, maar niet recent, primeert op een meetpunt met een recentere maar [kortere tijdreeks.]{#derde-criterium}
+
+<!-- - De tijdreeks omspant binnen de periode _2001_ en _2016_ minstens _5 jaar_ -->
+<!-- - Deze tijdreeks is _maximaal 2 opeenvolgende jaren_ onderbroken -->
+<!-- - Deze tijdreeks bevat _minstens 5 (hydrologische) jaren_ waarvoor een lg3[^2] kan berekend worden. -->
+
+Deze basiskwaliteitscriteria zijn te beschouwen als een eerste screening op basis van actueel beschikbare feitelijke grondwatermetingen. 
+
+Het gebruik van deze criteria leidt er ook toe dat in een rastercel bij de toewijzing van een meetpunt, indien mogelijk (= in categorie 3), rekening wordt gehouden met de datakwaliteit.
+
+
+[^3]: Een kwalitatief goed meetjaar wordt hier gedefinieerd als een hydrologisch jaar waarvoor een lg3 kan berekend worden. Dit houdt in dat er minstens 20 goed gespreide metingen per jaar zijn. Het verschil tussen twee metingen mag niet groter zijn dan 30 dagen en de eerste en laatste meting moet resp. in april en maart (van het daaropvolgende kalenderjaar) vallen. 
+[^4]: lg3 =  het gemiddelde van de drie laagste waterpeilen binnen een hydrologisch jaar (1 april - 31 maart), waarbij er tussen deze drie metingen minstens 14 dagen verschil ligt. -->
+
+<!-- De extreem droge zomers van 2017 en 2018 worden niet meegenomen in de berekening. Het is namelijk nu nog onduidelijk (door mogelijke naijling) of de actuele vegetatie geen nadelige effecten van deze twee zomers heeft ondervonden. -->
+
+<!-- Nemen we ook het kwaliteitsaspect mee in de beoordeling, dan wordt de categorie-indeling van rastercellen complexer.  -->
+<!-- Op basis van de kwaliteit van de tijdreeksen kunnen dan per GT-groep de rastercellen in één of meer van de volgende categorieën opgedeeld worden. Deze categorieën sluiten elkaar niet mutueel uit (zie onder). -->
+
+
+```{r voorbeeld-selectie-part1, fig.cap="Cijfervoorbeeld van de gevolgde workflow bij de selectie", , fig.width=8, fig.height=8, eval = FALSE}
+  include_graphics(path = file.path(".","figures", "meetnet", 
+                                    "voorbeeld_selectie_part1.png")) 
+```
+```{r voorbeeld-selectie-part2, fig.cap="Cijfervoorbeeld van de gevolgde workflow bij de selectie (vervolg)", fig.width=8, fig.height=8, eval = FALSE}
+  include_graphics(path = file.path(".","figures", "meetnet", 
+                                    "voorbeeld_selectie_part2.png")) 
+```
+
+
+#### Tijdreeksanalyse {#tijdreeksanalyse}
+
+Tijdreeksanalyse is een middel om grondwaterstandsmetingen te analyseren [zie bijv. @RN877]. 
+In feite zouden ook meetreeksen van oppervlaktewaterpeilen geanalyseerd kunnen worden, maar dit is weinig gebruikelijk, waarschijnlijk omdat er moeilijker een verband te leggen is met het weer (zoals neerslag en verdamping). 
+In dit project willen we deze analysetechniek toepassen op grondwatermeetreeksen met twee doeleinden:
+
+* het verlengen of invullen van te korte of onregelmatige grondwaterstandsreeksen
+* het opsporen van lineaire trends
+
+Het eerste doel is ook al hoger ter sprake gekomen: voor het berekenen en evalueren van indicatoren is het nodig te kunnen beschikken over relatief lange meetreeksen. 
+We zoeken meetreeksen die aanvangen in 1985 of eerder.
+Slagen we er in om op een betrouwbare wijze de reeksen vanaf 1985 te verlengen/vervolledigen, dan kan een meetpunt geschikt worden om in het droogtemeetnet opgenomen te worden. 
+De tijdreeksen krijgen ook een uniforme lengte, waardoor het opvolgen van de evolutie van de droogte-indicator over de jaren heen meer betekenis krijgt.
+
+Het tweede doel is in feite een bijkomend selectiecriterium. 
+Indien uit een tijdreeksanalyse blijkt dat, na rekening te houden met zoveel mogelijk factoren (maar in de praktijk enkel met het weer), de niet door het weer verklaarde component van de waterstanden van een meetpunt geleidelijk aan daalt of stijgt, leent dat meetpunt zich niet goed voor het berekenen van een droogte-indicator. 
+Het is immers in dergelijke gevallen moeilijk om nieuwe metingen te interpreteren, omdat we niet weten in welke mate de oorzaak van de lineaire trend (zelfs als is de oorzaak bekend) de peilen nog beïnvloedt. 
+Indien een tijdreeks een lineaire trend vertoont, wordt het meetpunt daarom als momenteel ongeschikt beschouwd.
+Een tijdreeks mag daarentegen wel een sprong in de tijd vertonen, omdat een tijdreeks voor een eenmalige gebeurtenis met een kortstondig effect kan gecorrigeerd worden. 
+
+Voor de tijdreeksanalyse doen we beroep op het computerprogramma Menyanthes [@RN5899]. 
+Voor het samenstellen van de verklarende reeksen (neerslag en evapotranspiratie) werd beroep gedaan op de data van de meetstations beheerd door KMI, VMM, HIC en KNMI. 
+Voor de waterstandgegevens werd de Watina-databank geraadpleegd. 
+
+Er werden, zoals hoger al aangehaald, geen kwaliteitseisen gesteld aan een meetreeks die deze a priori zou uitsluiten van een tijdreeksanalyse.
+Het is, door het hoge aantal beschikbare meetpunten, echter niet doenbaar om een tijdreeksanalyse uit te voeren op alle meetpunten. 
+
+Wel werden alle meetreeksen van de meetpunten die behoren tot rastercellen van cat. 1 en cat. 2 geanalyseerd. 
+Voor categorie 3 bleef dat beperkt tot die meetpunten die behoren tot de hoogste kwaliteitsklassen die nodig zijn om tot het gewenst aantal meetpunten te komen.
+
+Een meetreeks werd weerhouden onder twee voorwaarden: 
+
+1. Een tijdsmodel met uitsluitend neerslag- en evapotranspiratiedata als verklarende reeksen kan minstens 66% van de variatie in de waargenomen peilen (cfr. EVP, explained variance percentage, in de Menyanthes-software) verklaren.
+2. De tijdreeks, na rekening te houden met neerslag en evapotranspiratie of eventueel andere factoren (bijv. het peil van een naburige waterloop), vertoont geen significante lineaire trend. 
+
+Minstens twee derde van het peilverloop dient dus verklaard te kunnen worden door het weer.
+Een derde kan/mag door andere factoren beïnvloed worden (bijv. het peil van een naburige waterloop, bemaling, ...).
+Deze voorwaarde is veeleer uit pragmatisch oogpunt opgelegd. 
+We beschikten immers voor de kandidaat-peilbuizen voor de externe factoren nooit over voldoende gegevens, zijnde dagelijkse metingen voor een periode van meer dan 30 jaar (1985 - 2018).
+Hierdoor was het niet mogelijk een tijdsmodel voor die periode samen te stellen.
+
+Een [lineaire trend]{#lintrend} werd als significant beschouwd indien de stijging/daling per jaar (= `trend`), rekening houdend met de standaardafwijking hierop (= `se`), voldoet één van de volgende twee regels:
+
+$$trend - 1.96* se > 1(cm/jaar)$$ 
+of 
+$$trend + 1.96* se < -1(cm/jaar)$$
+Er is dan 2.5% kans een trendwaarde die groter resp. kleiner is ten onrechte als een significante trend te bestempelen.
+
+De kwaliteit van een tijdreeks kan na een tijdreeksanalyse anders beoordeeld worden. 
+Bijvoorbeeld een meetpunt met veel peilmetingen, die echter een duidelijke lineaire trend vertonen, is niet geschikt om onmiddellijk in het meetnet te worden opgenomen.
+Anderzijds komt een meetpunt met minder metingen, maar waarvoor een goed model kan gebouwd worden (zonder lineaire trend), wel in aanmerking om nu reeds in het meetnet te worden opgenomen.
+
+Bij de modelselectie kwam toch ook nog expertoordeel bij kijken. 
+ 
+De gestelde kwaliteitseisen leiden niet tot uitsluiting van een tijdreeksanalyse.
+In principe kan elke peilbuis, zelfs al is er maar één meting van bekend, geselecteerd worden.
+En zo geschiedde ook.
+Deze meetreeksen werden manueel afgekeurd. 
+Sommige heel korte tijdreeksen hadden zelfs bijna een perfecte fit, maar het was toch onbetrouwbaar om hiermee waarden te simuleren over een relatief lange tijdsperiode. 
+
+Anderzijds werd een model met een verklarende variantie beneden 66% soms nog weerhouden, indien bleek dat het model de lage grondwaterstanden goed kon modelleren.
+
+Een lange tijdreeks met een trend < 1cm/jaar, maar waarbij de peilen maar weinig schommelen (kleine amplitude) kon toch owv deze trend afgekeurd worden (bijv. een tijdreeks waarbij over 15 jaar er een duidelijke stijging van 10 cm te zien is, terwijl de peilen slechts een amplitude van 40 cm hebben) en vice versa.
+
+
+Het al dan niet weerhouden van een tijdreeks kan in categorie 3 gevolgen hebben voor het selecteren van een meetpunt. 
+Immers hierbinnen wordt gestreefd minstens zoveel geschikte meetpunten te vinden dan er gezocht worden. 
+Zijn er meer geschikte punten dan gezocht, dan kan gestopt worden met verder zoeken. 
+Zolang dit aantal echter niet bereikt is, wordt (iteratief) verder gezocht. 
+
+
+#### Bijkomende GRTS-analysen
+
+Afhankelijk van de verhouding tussen het aantal gewenste, beschikbare enerzijds (categorie 1) en het aantal gewenste en geschikte peilbuizen anderzijds (categorie 3), moeten er nog enkele bijkomende GRTS-analysen uitgevoerd worden.
+
+##### Selecteren van potentiële geschikte habitatvlekken voor rastercellen waarvoor er te weinig peilbuizen bestaan (cat. 1) {#sel-pot-habvlek}
+
+Voor rastercellen van cat. 1 is er een nood aan één of meer extra meetpunten.
+Om hierbinnen (8192 * 8192 m) de plaatskeuze zo aselect mogelijk te doen, doen we beroep op het fijnste GRTS-raster 'GRTSmaster_habitats' (celgrootte = 32 m). 
+Opnieuw wordt op deze manier een synergie bekomen met de aselecte locatiekeuzes in MNM.
+Elk deelrastercel heeft binnen de rastercel een bepaalde rangnummer. 
+Alleen deelrastercellen _die voor het merendeel vegetaties bevatten die tot de GT-groep behoren_ komen voor selectie in aanmerking. 
+De deelrastercel(len) met het /de laagste rangnummer(s) zal/zullen dan geselecteerd worden. 
+Aan de selectie van deelrastercellen kunnen, naast de aanwezigheid van de juiste GT-groep, nog bijkomende voorwaarden gekoppeld worden (beheerder, ...).
+Blijkt bij inspectie op terrein dat de geselecteerde plaats toch niet aan de verwachtingen/criteria voldoet, dan wordt binnen dezelfde rastercel de rastercel die het eerst in rang volgt binnen een zoekstraal van 1 km bezocht.  
+
+
+##### Selecteren van een meetpunt in een rastercel waarvoor meerdere kandidaten zijn (cat. 3) {#sel-habvlek}
+Afhankelijk van de verhouding tussen gewenste aantal en het aantal geschikte peilbuizen is er mogelijk een extra analyse nodig. 
+
+- Is het aantal geschikte peilbuizen groter dan het gewenste aantal, dan wordt enkel binnen deze groep een GRTS-analyse uitgevoerd om het gewenste aantal te selecteren.
+
+- Is het aantal kleiner dan het gewenste aantal, dan wordt er uit alle beschikbare peilbuizen via een GRTS-analyse het gewenste aantal geselecteerd.
+Alle geschikte peilbuizen worden hierbij geselecteerd.
+
+- Is het aantal gelijk aan het gewenste aantal, dan hoeft er geen verdere analyse te gebeuren. Alle meetpunten kunnen in het meetnet worden opgenomen.
+
+Net zoals voor cat. 1 willen we de keuze zo aselect mogelijk doen. 
+We doen hiervoor terug beroep op het fijnste GRTS-raster 'GRTSmaster_habitats' (celgrootte = 32 m).
+Het/de meetpunt(en) gelegen in de deelrastercel(len) met het /de laagste rangnummer(s) zal/zullen dan geselecteerd worden.
+Deze werkwijze laat ook gemakkelijk toe om reserve-punten te kiezen.
+Het zijn de meetpunten die in rang volgen op de laagste rang van een gekozen punt.
+
+#### Samenvatting werkgang selectie peilbuizen
+Na de ruimtelijke selectie weten we hoeveel meetpunten er per rastercel en per GT-groep gewenst zijn.
+
+We proberen die wensen zoveel mogelijk in te vullen met bestaande peilbuizen waarvan hun meetreeksen toelaten een droogte-indicator te berekenen.
+
+Hiertoe evalueren we de kwaliteit van de meetreeksen op basis van de mogelijkheid om voor minstens één jaar een lg3 te berekenen voor de metingen na 2000, van het aantal meetjaren en van de ouderdom van de meetreeks. 
+
+De kwalitatief beste meetreeksen worden verder beoordeeld met een tijdreeksanalyse. 
+Door het grote aantal peilbuizen was het niet mogelijk ze alle te analyseren. De voorkeur ging daarom uit naar de relatief beste reeksen. 
+Een meetreeks wordt 'geschikt' bevonden als minstens 2/3 van de variatie door het weer kan verklaard worden en er in de reeks geen lineaire trend te zien is. 
+Op basis van de tijdreeksanalyse worden de meetreeksen geherklasseerd in 'geschikt', 'niet 'geschikt' en 'onbekend' (indien niet behandeld). 
+Er worden minstens zoveel peilbuizen geanalyseerd tot er evenveel of meer geschikte reeksen zijn dan het gewenste aantal, zoniet worden ze allemaal geanalyseerd.
+
+Is een meetreeks 'geschikt', dan kan de peilbuis onmiddellijk in het meetnet opgenomen worden.
+Is ze 'niet geschikt', dan kan dit pas na verloop van enkele jaren.
+
+De rastercellen kunnen in drie categorieën (cat. 1- 3) verdeeld worden op basis van de verhouding tussen het aantal gewenste en beschikbare peilbuizen. 
+Bij cat. 1 zijn er te weinig peilbuizen. 
+De meetreeksen van alle peilbuizen werden geanalyseerd. 
+Via een GRTS-procedure wordt het ontbrekend aantal aangevuld met habitatvlekken. 
+In cat. 2 klopt het gewenste aantal met het beschikbaar aantal en hoeft er geen aansluitende analyse meer uitgevoerd te worden.
+
+In cat. 3 zijn er meer peilbuizen beschikbaar. 
+Afhankelijk van de verhouding tussen het gewenste aantal en het aantal geschikte peilbuizen is er mogelijk een extra GTRS-analyse nodig om het gewenste aantal te selecteren. 
+
+
+Figuur \@ref(fig:workflow-selectiepb-part2) geeft schematisch het overzicht van de werkgang die gevolgd werd om uit de beschikbare peilbuizen meetpunten te selecteren en deze desnoods aan te vullen met nieuwe.
+
+(ref:workflow-selectiepb2) werkgang selectie rastercellen. Voor de betekenis van de symbolen zie figuur \@ref(fig:workflow-rastercellen).
+
+```{r workflow-selectiepb-part2, fig.cap='(ref:workflow-selectiepb2)'}
+if (pdfmaken == TRUE) {
+  include_graphics(path = file.path(".","figures", "meetnet",
+                                    "workflow_pbselectie_part2_pdf.jpg"))
+} else {
+  include_graphics(path = file.path(".","figures", "meetnet", 
+                                    "workflow_pbselectie_part2.png"))
+}
+```
+
+
+<!-- [^3]: KWR & Waterware (2018). Menyanthes, versie 3.x.b.w.  -->
+
+<!-- [^2]: Von Asmuth J.R., Maas K., Cirkel G. (2004). Tijdreeksanalyse van grondwaterstanden nu binnen ieders bereik. H2O 24:31-33. -->
+
+## Bepaling droogte-indicator voor de geselecteerde punten
+
+### Droogte-indicatoren
+Er zijn verschillende indicatoren mogelijk om droogte te detecteren [@RN5703].
+
+Binnen dit project berekenen we de huidig gebruikte droogte-indicator:
+De indicator vergelijkt de grondwaterstand op een gegeven dag met de grondwaterstanden die op diezelfde plaats en dag van het jaar zijn voorgekomen in het verleden. 
+De indicator evalueert dus de droogtetoestand rekening houdend met de tijd van het jaar. 
+Zo kunnen ook relatief lage grondwaterstanden in het voorjaar als droogte aangeduid worden. 
+
+De indicator kleurt respectievelijk rood, oranje of geel op een bepaalde plaats en dag zodra de grondwaterstand er minstens 14 dagen onder de p10, p20 of p30 (situatie met overschrijdingskans van 10, 20 of 30%) is gebleven. 
+_**De indicator kleurt respectievelijk rood, oranje of geel voor Vlaanderen als minstens de helft van de putten kleurcode rood, oranje of geel heeft. (vraag: is dit ook aangewezen voor dit meetnet ?). **_
+
+### Berekeningswijze voor de geselecteerde punten 
+Voor het berekenen van de droogte-indicator doen we beroep op tijdreeksen van 1985 tot en met 2015, met al dan niet gemodelleerde, metingen. 
+De recentste jaren (2016-2020) worden niet meegenomen, omdat het nu nog onduidelijk is hoe de actuele vegetatie hierop reageert (door naijling).
+Voor elke bestaande geselecteerde meetlocatie wordt dan voor elke dag van het groeiseizoen (1 april - 1 oktober) de p10, p20 en p30 percentielwaarde berekend.
+
+<!--chapter:end:02_methodiek.Rmd-->
+
 
 # Uitvoering
 
@@ -396,7 +1449,7 @@ sel_raster_meetnet <-
   group_by(rasterid, groupnr, opp_gw_cel, gew_aantal_meetptn) %>% 
   summarise (temp = n()) %>% 
   ungroup %>% 
-  dplyr::select(-temp)
+  select(-temp)
 
 #uit voorzorg nog eens de geometrie checken
 sel_raster_meetnet <- st_make_valid(sel_raster_meetnet)
@@ -527,8 +1580,7 @@ tubes_hab_multipolyg <- tubes_hab_groep %>%
           by = "loc_code")
 
 tubes_hab_aggr <- tubes_hab %>%
-  dplyr::select(-phab, -certain, -type, -source, -polygon_id,
-                -starts_with("description"), -opp) %>% 
+  select(-phab, -certain, -type, -source, -polygon_id, -starts_with("description"), -opp) %>% 
   distinct %>% 
   semi_join(tubes_hab_multipolyg, by = c("loc_code", "rasterid", "groupnr" ))
 
@@ -629,34 +1681,6 @@ tubes_xg3_avail <- tubes_xg3 %>%
 tubes_lg3_avail <- tubes_xg3_avail %>% 
   filter(nryears > 0)
 
-```
-
-```{r opslaan-tussentijdse-resultaten}
-pad <- file.path("data", "interim", "meetnet")
-objn <- c("aantal_meetpunten_cel", "gw_types", "habmap_gw_raster_overlay",
-          "habmap_polygons_gw", "habmap_types_gw", "params", "raster_gw_opp",
-          "raster_meetnet_poly", "raster_meetnet_poly_opp","sel_raster_meetnet",
-          "tubes_hab", "tubes_in_raster","tubes_lg3_avail", "tubes_xg3",
-          "tubes_xg3_avail", "types") 
-
-if (!file.exists(file.path("data", "interim", "meetnet", "tubes_lg3_avail.rds"))) {
-  walk(objn, .f = function(x) {
-    obj <- get(x)
-    saveRDS(obj, file.path(pad, paste0(x, ".rds")))
-  })
-  
-} else {
-  objn <- subset(objn, objn != "params")
-  path_rds_in_interim <- file.path(pad, objn)
-  path_rds_in_interim <- setNames(paste0(path_rds_in_interim,".rds"), 
-           make.names(objn))
-  list2env(
-    lapply(path_rds_in_interim, 
-           readRDS), 
-    envir = .GlobalEnv)
-  
-}
-rm(pad, objn, path_rds_in_interim)
 ```
 
 Voor deze peilbuizen werd nagegaan of ze een goede tijdreeks hebben (vanaf 2000 minstens 1 hydrologisch jaar waarvoor een lg3 kan berekend worden).
@@ -1248,7 +2272,7 @@ Bij de modelbouw werd steeds ook een versie met een lineaire trend berekend waar
 tubes_menyanthes <- read_csv(file.path(getwd(),"data","interim","meetnet", "tblTubes_Menyanthes_report.csv"))
 
 #veldnamen aanpassen
-colnames(tubes_menyanthes) <- snakecase::to_snake_case(colnames(tubes_menyanthes))
+tubes_menyanthes <- janitor::clean_names(tubes_menyanthes, case = "snake")
 
 #syntheseveld maken
 tubes_menyanthes <- tubes_menyanthes %>% 
@@ -2588,3 +3612,35 @@ if (pdfmaken == TRUE) {
 }
 
 ```
+
+<!--chapter:end:03_uitvoering.Rmd-->
+
+# (APPENDIX) Bijlagen {-}
+
+# Gebruikte werkomgeving
+
+```{r session-info, results = "asis", echo=FALSE}
+si <- devtools::session_info()
+p <- si$platform %>%
+  do.call(what = "c")
+sprintf("- **%s**:\n %s\n", names(p), p) %>%
+  cat()
+```
+
+```{r results = "asis", echo=FALSE}
+si$packages %>%
+    as_tibble %>%
+    select(package, loadedversion, date, source) %>%
+pander::pandoc.table(caption = "(\\#tab:sessioninfo)Loaded R packages",
+                     split.table = Inf)
+```
+
+
+
+<!--chapter:end:50_sessioninfo.Rmd-->
+
+# Literatuur {-}
+
+
+<!--chapter:end:90-literatuur.Rmd-->
+

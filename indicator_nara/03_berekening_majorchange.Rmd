@@ -201,9 +201,28 @@ moving_trend <- function(n_year = 30, trend_year = 6, first_year = 1985) {
 
 con <- dbConnect(odbc::odbc(), .connection_string = "Driver=SQL Server;Server=inbo-sql07-prd.inbo.be,1433;Database=D0136_00_Flaven;Trusted_Connection=Yes;")
 
-
+# basis (berekening 2020)
 
 ruwetabellen_lijst <- data.frame (a = "droogte_tijdreeks", b = "ruwedata", c = seq(from = 1, to = 23))
+
+ruwetabellen_lijst <- ruwetabellen_lijst %>% mutate (naambrontabel = paste0(a,c), 
+                                                     naamdoeltabel = sprintf(paste0(b,"%02d"), c)) 
+
+ruwetabellen_lijst <- setNames(ruwetabellen_lijst %>% dplyr::pull(naambrontabel), make.names(ruwetabellen_lijst %>% dplyr::pull(naamdoeltabel)))
+
+
+list2env(
+  lapply(ruwetabellen_lijst, 
+         dbReadTable, conn = con,
+         guess_max = 300000), 
+  envir = .GlobalEnv)
+
+# aanvulling/correctie 2024
+
+tijdreeksen_vernieuwd <- read_csv(file.path("data", "interim", "tijdreeksen_vernieuwd.csv"))
+
+ruwetabellen_lijst <- data.frame (a = "droogte24_tijdreeks", b = "ruwedata24_", 
+                                  c = seq(from = 1, to = 8))
 
 ruwetabellen_lijst <- ruwetabellen_lijst %>% mutate (naambrontabel = paste0(a,c), 
                                                      naamdoeltabel = sprintf(paste0(b,"%02d"), c)) 
@@ -223,14 +242,27 @@ DBI::dbDisconnect(con)
 ```
 
 ```{r wegschrijven-brontabellen-naar-vc-formaat, eval=FALSE }
-for (i in seq(from = 1, to = 19)){
+for (i in seq(from = 1, to = 23)){
   write_vc(get(sprintf("ruwedata%02d", i)), file.path("data", "local", sprintf("ruwedata%02d", i)), sorting = c("dag","meetpunt_import"), strict= FALSE)
 }
 
+for (i in seq(from = 1, to = 8)){
+  write_vc(get(sprintf("ruwedata24_%02d", i)), file.path("data", "local", sprintf("ruwedata%02d", i)))  
+}
 ```
 
+```{r wegschrijven-brontabellen-naar-rds-formaat, eval=FALSE }
+for (i in seq(from = 1, to = 23)){
+  saveRDS(get(sprintf("ruwedata%02d", i)), file.path("data", "local", paste0(sprintf("ruwedata%02d", i), ".rds")))
+}
 
-```{r inlezen-vc-tabellen, include=FALSE, eval=!file.exists(file.path("cache", "basisdata.rds" ))}
+for (i in seq(from = 1, to = 8)){
+  saveRDS(get(sprintf("ruwedata24_%02d", i)), 
+            file.path("data", "local", paste0(sprintf("ruwedata24_%02d", i), ".rds")))
+}
+```
+
+```{r inlezen-vc-tabellen, include=FALSE, eval=!file.exists(file.path("data", "local", "ruwedata_2024.rds" ))}
 # De data worden niet in één keer ingelezen.
 # De brondata zitten in 23 bestanden.
 # Elk van deze 23 bestanden is op zich al vrij omvangrijk.
@@ -256,7 +288,8 @@ sapply(1:nrow(ruwetabellen_lijst_rds), function(i) {
         saveRDS(get(ruwetabellen_lijst_rds$naambrontabel[i]), filename)
     })
 ```
-```{r inlezen-vc-tabellen-uit-cache, include=FALSE}
+
+```{r inlezen-vc-tabellen-uit-cache, include=FALSE, eval=!file.exists(file.path("data", "local", "ruwedata_2024.rds" ))}
 ruwetabellen_lijst <- data.frame(bron = "ruwedata", doel = "ruwedata", c = seq(from = 1, to = 23))
 
 ruwetabellen_lijst_rds <- ruwetabellen_lijst %>% mutate(naambrontabel = file.path("cache", paste0(bron,sprintf("%02d", c), ".rds")), 
@@ -267,28 +300,214 @@ list2env(lapply(X = ruwetabellen_lijst_rds, FUN = readRDS),
   envir = .GlobalEnv)
 ```
 
-```{r samenvoegen-bestanden, include=FALSE, eval=!file.exists(file.path("cache", "basisdata.rds" ))}
+
+```{r inlezen-rds-tabellen-uit-cache, include=FALSE, eval=!file.exists(file.path("data", "local", "ruwedata_2024.rds" ))}
+check <- readRDS(file.path("cache", paste0("ruwedata", sprintf("%02d", 1), ".rds")))
+ all.equal(check %>% 
+             arrange(meetpunt_import, dag) %>% data.frame(), ruwedata01 %>% 
+             arrange(meetpunt_import, dag) %>% data.frame())
+ 
+check2 <- readRDS(file.path("data", "local", paste0("ruwedata", sprintf("%02d", 1), ".rds")))
+ all.equal(check %>% 
+             arrange(meetpunt_import, dag) %>% data.frame(), check2 %>% 
+             arrange(meetpunt_import, dag) %>% data.frame())
+ 
+# basistabellen (versie 2020)
+ruwetabellen_lijst <- data.frame(bron = "ruwedata", doel = "ruwedata", c = seq(from = 1, to = 23))
+
+ruwetabellen_lijst_rds <- ruwetabellen_lijst %>% 
+  mutate(naambrontabel = file.path("data", "local", paste0(bron,sprintf("%02d", c), ".rds")),
+         naamdoeltabel = sprintf(paste0(doel,"%02d"), c)) 
+ruwetabellen_lijst_rds <- setNames(ruwetabellen_lijst_rds %>% 
+                                     dplyr::pull(naambrontabel), 
+                                   make.names(ruwetabellen_lijst_rds %>% 
+                                                dplyr::pull(naamdoeltabel)))
+
+list2env(lapply(X = ruwetabellen_lijst_rds, FUN = readRDS), 
+  envir = .GlobalEnv)
+
+# aanvulling 2024
+ruwetabellen_lijst <- data.frame(bron = "ruwedata24_", doel = "ruwedata24_", c = seq(from = 1, to = 8))
+
+ruwetabellen_lijst_rds <- ruwetabellen_lijst %>% 
+  mutate(naambrontabel = file.path("data", "local", paste0(bron,sprintf("%02d", c), ".rds")),
+         naamdoeltabel = sprintf(paste0(doel,"%02d"), c)) 
+ruwetabellen_lijst_rds <- setNames(ruwetabellen_lijst_rds %>% 
+                                     dplyr::pull(naambrontabel), 
+                                   make.names(ruwetabellen_lijst_rds %>% 
+                                                dplyr::pull(naamdoeltabel)))
+
+list2env(lapply(X = ruwetabellen_lijst_rds, FUN = readRDS), 
+  envir = .GlobalEnv)
+```
+
+```{r samenvoegen-bestanden, include=FALSE, eval=!file.exists(file.path("data", "local", "mruwedata_fin.rds" ))}
 #ik verkies dit in een aparte chunk te doen, omdat het zo mogelijk is om testdata samen te stellen, bv. ik heb voor het uittesten van de methoden gewerkt met een testbestand van de eerste 5 ruwe tabellen.
 
-ruwedata <- purrr::map_dfr(sprintf("ruwedata%02d",1:23), get )
+if (!file.exists(file.path("data", "local", "ruwedata_2020.rds"))) {
+  ruwedata_2020 <- purrr::map_dfr(sprintf("ruwedata%02d",1:23), get )
+  saveRDS(ruwedata_2020, file.path("data", "local", "ruwedata_2020.rds"))
+  rm(list = ls(pattern = "^ruwedata20"))  
+} else {
+  ruwedata_2020 <- readRDS(file.path("data", "local", "ruwedata_2020.rds"))
+}
+if (!file.exists(file.path("data", "local", "ruwedata_2024.rds"))) {
+  ruwedata_2024 <- purrr::map_dfr(sprintf("ruwedata24_%02d",1:8), get )
+  saveRDS(ruwedata_2024, file.path("data", "local", "ruwedata_2024.rds"))
+  rm(list = ls(pattern = "^ruwedata24"))  
+} else {
+  ruwedata_2024 <- readRDS(file.path("data", "local", "ruwedata_2024.rds"))
+}
+
+#samenvoegen bestanden
+ruwedata <- ruwedata_2020 %>% 
+  mutate(ronde = 1) %>% 
+  bind_rows(ruwedata_2024 %>% 
+              mutate(ronde = 2))
+# veleptn <- c("COOP001", "DYLP029", "HBTP007", "IJSP023",
+#                          "KALP022", "KBRP056", "LDOP041", "MOLP023",
+#                          "WALP118")
+# ruwedata20.veleptn <- ruwedata_2020 %>%
+#   filter(meetpunt %in% veleptn)
+# ruwedata24.veleptn <- bind_rows(ruwedata24_01, ruwedata24_02, ruwedata24_03,
+#                                 ruwedata24_04, ruwedata24_07) %>%
+#   filter(meetpunt %in% veleptn)
+# 
+# ruwedata.veleptn <- ruwedata20.veleptn %>%
+#   mutate(ronde = 1) %>%
+#   bind_rows(ruwedata24.veleptn %>%
+#               mutate(ronde = 2))
+
+# er werden veldmetingen toegevoegd buiten de periode waarvoor simulaties voor berekend werden. Deze mogen gerust verwijderd worden. Het simulatienr is hier leeg.
+ruwedata <- ruwedata %>% 
+  filter(!is.na(simulatienr))
+# ruwedata.veleptn <- ruwedata.veleptn %>%
+#   filter(!is.na(simulatienr))
+
+# #dubbels (er zijn er zeker)
+# # duurt heel lang !
+# check <- ruwedata %>% 
+#   filter(meetpunt_import != meetpunt) %>% 
+#   count(meetpunt, simulatienr, dag) %>% 
+#   filter(n > 1)
+# 
+# test <- ruwedata %>% 
+#   filter(meetpunt == "ASBP003")
+
+saveRDS(ruwedata, file.path("data", "local", "ruwedata_start.rds"))
+# ruwedata <- ruwedata %>% filter(!meetpunt %in% veleptn) %>%
+#   bind_rows(ruwedata.veleptn)
+
+# volgende berekening duurt een paar uren !
+ruwedata <- ruwedata %>% 
+  group_by(meetpunt, simulatienr, dag) %>% 
+  slice_max(order_by = ronde, with_ties = TRUE) %>% # we geven voorrang aan de laatste versie, want dit is de verbeterde versie
+  ungroup()
+
+# check <- ruwedata.veleptn %>%
+#   group_by(meetpunt, simulatienr, dag) %>%
+#   slice_max(order_by = ronde, with_ties = TRUE) %>% # we geven voorrang aan de laatste versie, want dit is de verbeterde versie
+#   ungroup()
+# # 
+# ruwedata.rds <- readRDS(file.path("data", "local", "ruwedata_vervolg.rds"))
+# ruwedata.vervolg <- ruwedata.rds %>% filter(!meetpunt %in% veleptn) %>%
+#   bind_rows(check)
+
+saveRDS(ruwedata, file.path("data", "local", "ruwedata_vervolg.rds"))
+
+
+# er zitten nog dubbels in, deze moeten blijven ! Op dagen met een veldmeting is er ook een simulatiewaarde (ook voor simulatienr =1). Alle simulatiewaarden (en niet alleen voor simulatienr = 1) moeten verwijderd worden, want ze kunnen afwijken van de veldmeting, die we uiteraard prioriteit willen geven.
+
+# #check op dubbels duurt ook enkele minuten
+# check.dubbels <- ruwedata %>% count(meetpunt, simulatienr, dag) %>% 
+#   filter(n > 1)
+
+
+# verwijderen van simulaties op dagen dat er een veldmeting is + 7 dagen ervoor en 7 dagen erna
+# is_veldmeting = 1 => veldmeting
+# is_veldmeting = -1 => simulatie op minder dan 7 dagen van een veldmeting: dus te schrappen
+# is_veldmeting = 0 => simulatiemeting, te behouden
+mruwedata <- ruwedata %>% 
+  filter((meetpunt_import == meetreeks & is_veldmeting == 1) | is_veldmeting == 0) 
+
+saveRDS(mruwedata, file.path("data", "local", "mruwedata.rds"))
+
+checkmruw <- mruwedata %>% 
+  filter(meetpunt == "ASBP003")
+
+check3 <- checkmruw %>% 
+  count(dag)
+
+check4 <- checkmruw %>% 
+  inner_join(check3 %>% filter(n == 1), by = join_by(dag))
+
+
+
+mruwedata.veld <- mruwedata %>% 
+  filter(is_veldmeting == 1) 
+check.dubbels <- mruwedata.veld %>% count(meetpunt, simulatienr, dag) %>%
+  filter(n > 1)
+# = 0 => ok
+saveRDS(mruwedata.veld, file.path("data", "local", "mruwedata_veld.rds"))
+
+# deze veldmetingen moeten nog gemultipliceerd worden tot 20, omdat er 20 simulaties berekend werden (met dus voor die dagen constante waarden)
+simreeksnr.add <-  c(2:20)
+# test <- mruwedata.veld %>% filter(meetpunt == "ASBP003")
+# test.basis <- mruwedata %>% filter(meetpunt == "ASBP003")
+mruwedata.add <- map(simreeksnr.add, .f = function(x){
+  reeks.add <- mruwedata.veld %>% 
+    mutate(simulatienr = x)
+}) %>% list_rbind()
+
+# samenvoegen, duurt ook lang
+mruwedata <- mruwedata %>% 
+  bind_rows(mruwedata.add)
+saveRDS(mruwedata, file.path("data", "local", "mruwedata_vervolg.rds"))
+# check wat het doet om onvolledige meetreeksen (<365 metingen/jaar) te hebben, dit is nl. nu het geval als er periodieke (minder frequent dan dagelijks) veldmetingen zijn, want gesimuleerde metingen in een tijdsinterval van 7 dagen voor en na zijn geschrapt, omdat deze teveel de veldmetingen zouden overrulen.
+reeks.vol <- data.frame(dag = 1:365, meting_TAW = seq_len(365))
+reeks.periodiek <- data.frame(dag = seq(from = 1, to = 365, by = 7), meting_TAW = seq(from = 1, to = 365, by = 7))
+
+absperc.vol <- reeks.vol %>% 
+  summarise(p01 = quantile(meting_TAW, 1/100),
+            p05 = quantile(meting_TAW, 5/100),
+            p10 = quantile(meting_TAW, 10/100),
+            p30 = quantile(meting_TAW, 30/100),
+            p50 = quantile(meting_TAW, 50/100),
+            p70 = quantile(meting_TAW, 70/100),
+            p90 = quantile(meting_TAW, 90/100),
+            p95 = quantile(meting_TAW, 95/100),
+            p99 = quantile(meting_TAW, 99/100)
+            ) 
+absperc.periodiek <- reeks.periodiek %>% 
+  summarise(p01 = quantile(meting_TAW, 1/100),
+            p05 = quantile(meting_TAW, 5/100),
+            p10 = quantile(meting_TAW, 10/100),
+            p30 = quantile(meting_TAW, 30/100),
+            p50 = quantile(meting_TAW, 50/100),
+            p70 = quantile(meting_TAW, 70/100),
+            p90 = quantile(meting_TAW, 90/100),
+            p95 = quantile(meting_TAW, 95/100),
+            p99 = quantile(meting_TAW, 99/100)
+            ) 
+all.equal(absperc.vol, absperc.periodiek)
+# heel goed nieuws !, het ontbreken van metingen heeft geen directe impact op de percentielberekening 
+
 
 #data cleaning - algemeen
-# 1) uitsluiten van niet gesimuleerde meetreeksen (veldmetingen zitten namelijk al in de simuleerde reeksen, zou dus tot dubbeltellingen leiden) 
+# 1) beperken van de meetreeks in lengte: van 1985 tot en met 2022 (2023 was onvolledig)
 # 2) factoriseren van meetpunt en weglaten van ongebruikte velden 
 
-ruwedata <-  ruwedata %>% 
-  filter(meetpunt_import != meetreeks, year(dag) >= 1985) %>%  # 
+mruwedata.fin <-  mruwedata %>% 
+  filter(between(year(dag),1985, 2022)) %>%  
   mutate(meetpunt = factor(meetpunt)) %>% 
-  dplyr::select(-meetpunt_import, -meetreeks, -is_veldmeting) #om de grootte van het databestand te reduceren
+  dplyr::select(-meetpunt_import, -meetreeks, -is_veldmeting, -ronde) #om de grootte van het databestand te reduceren
 
-#data-cleaning - specifiek voor de eerste dataset
-#1) jaar 2019 is onvolledig: slechts data tot half mei
+# bewaren
+saveRDS(mruwedata.fin, file.path("data", "local", "mruwedata_fin.rds"))
 
-ruwedata <- ruwedata %>% 
-  filter( year(dag) < 2019)
-# indic_abs_basis_gw <- indic_abs_basis_gw %>% 
-#   filter( between(simulatienr, 1,20), jaar < 2019)
-
+# opruimen
+rm(list = ls(pattern = "^ruwedata|^ruwetabellen|^tijdreeksen_v|^reeks|\\.add$|\\.veld|^test|^absperc|^check|mruwedata.add|mruwedata.veld"))
+gc()
 ```
 
 ```{r samenvoegen-bestanden-test, include=FALSE, eval= FALSE}
@@ -311,13 +530,13 @@ ruwetest <- ruwetest %>%
   filter( year(dag) < 2019)
 ```
 
-```{r verwijderen-tsv-tabellen, eval = FALSE}
+```{r verwijderen-ruwe-tabellen, eval = TRUE}
 #verwijderen van de 23 deelbestanden (beter nog niet doen als je wil testen, het is handig om te testen met één van de bestanden, bv. ruwedata01 (rel. groot) of ruwedata19 (rel klein)
-rm(list = sprintf("ruwedata%02d", 1:23))
-
+rm(list = sprintf("ruwedata%02d", c(2:18,20:23)))
+rm(list = sprintf("ruwedata24_%02d", c(1:3,5:7)))
 ```
 
-```{r tubes-network, include=FALSE}
+```{r tubes-network, include=FALSE, eval=TRUE}
 #laatste versie met de geselecteerde meetpunten ophalen. De ruwe data bevatten namelijk ook nog meetreeksen van punten van een eerdere versie.
 
 tubes_selected <- read_vc(file.path(".","data","result","meetnet","tubes_selected"), root = gitroot)
@@ -329,7 +548,8 @@ tubes_indicator <- tubes_selected %>%
   dplyr::select(loc_code, groupnr)
 ```
 
-```{r basisdata-final, include=FALSE, eval=!file.exists(file.path("cache", "basisdata.rds" ))}
+```{r basisdata-final, include=FALSE, eval= FALSE}
+# eval=!file.exists(file.path("cache", "basisdata.rds" ))
 #beperken van de ruwe data tot de laatste versie van de geselecteerde meetpunten
 ruwedata <- ruwedata %>% 
   semi_join(tubes_indicator, by = c("meetpunt" = "loc_code"))
@@ -345,8 +565,8 @@ ruwedata <- ruwedata %>%
 saveRDS(ruwedata,file.path("cache", "basisdata.rds" ))
 ```
 
-```{r basisdata-final-uit-cache, include=FALSE}
-ruwedata <- readRDS(file.path("cache", "basisdata.rds" ))
+```{r basisdata-final-uit-cache, include=FALSE, eval=!file.exists(file.path("data", "local", "mruwedata_fin.rds" ))}
+mruwedata.fin <- readRDS(file.path("data", "local", "mruwedata_fin.rds" ))
 ```
 
 
@@ -355,8 +575,8 @@ Een absolute indicator vergelijkt dagelijks het grondwaterpeil met een kritische
 De dagen dat het grondwaterpeil onder deze drempelwaarde valt, worden per jaar opgeteld (\@ref(h2:methode-drempelwaarde) en \@ref(h2:methode-indicator)).
 Dit zijn de absolute indicatorwaarden.
 
-```{r absolute-drempelwaarden, include=FALSE, eval = !file.exists(file.path("cache", "percentielen.rds" ))}
-absperc <- ruwedata %>% 
+```{r absolute-drempelwaarden, include=FALSE, eval = !file.exists(file.path("data", "local","percentielen.rds" ))}
+absperc <- mruwedata.fin %>% 
   mutate(jaar = year(dag)) %>% 
   filter(dplyr::between(jaar,1985,2014)) %>% 
   group_by(meetpunt, jaar) %>% 
@@ -483,10 +703,10 @@ d.check.30 <- ruwedata %>%
 
 ```{r schrikkeljaren, include=FALSE}
 
-schrikkeljaar <- ruwedata %>% 
+schrikkeljaar <- mruwedata.fin %>% 
   mutate(jaar = year(dag)) %>%   
   filter(meetpunt == 
-           ruwedata %>% 
+           mruwedata.fin %>% 
            dplyr::select(meetpunt) %>% 
            head(1) %>% 
            dplyr::pull(meetpunt)
@@ -498,7 +718,7 @@ schrikkeljaar <- ruwedata %>%
 
 ```
 
-```{r gwgroups, include=FALSE, eval = !file.exists(file.path("cache", "percentielen.rds" ))}
+```{r gwgroups, include=FALSE, eval = !file.exists(file.path("data", "local", "percentielen.rds" ))}
 #herijking grondwatertype-groepen, want er blijkt nog nauwelijks een verband te bestaan tussen de amplitude van een pb en de gw-typegroep waartoe het wordt gerekend
 absperc_gw <- absperc %>% 
   inner_join(tubes_indicator %>% 
@@ -514,19 +734,19 @@ absperc_gw <- absperc %>%
 
 
 #wegschrijven in een RDS-bestand
-saveRDS(absperc_gw,file.path("cache", "percentielen.rds" ))
+saveRDS(absperc_gw,file.path("data", "local", "percentielen.rds" ))
 
 write_vc(absperc_gw, file.path("data", "result", "percentielen-1985-2014"), root = projroot, sorting = c("meetpunt"))
-
+# absperc_gw_oud <- read_vc( file.path("data", "result", "percentielen-1985-2014"), root = projroot)
 ```
 
 ```{r gwgroups-uit-cache, include=FALSE}
-absperc_gw <- readRDS(file.path("cache", "percentielen.rds" ))
+absperc_gw <- readRDS(file.path("data", "local", "percentielen.rds" ))
 ```
 
-```{r abs-indicator, eval = !file.exists(file.path("cache", "dagendroognat.rds" ))}
+```{r abs-indicator, eval = !file.exists(file.path("data","local", "dagendroognat.rds" ))}
 
-dagen_droog_nat <- ruwedata %>% #oude objectnaam: indic_abs_basis
+dagen_droog_nat <- mruwedata.fin %>% #oude objectnaam: indic_abs_basis
   inner_join(absperc_gw, by = "meetpunt") %>% 
   mutate(jaar = year(dag),
          aantaldagen_jaar = if_else(jaar %in% schrikkeljaar, 366, 365 )
@@ -572,13 +792,13 @@ dagen_droog_nat <- ruwedata %>% #oude objectnaam: indic_abs_basis
 
 
 ```
-```{r rollend-gemiddelde, eval = !file.exists(file.path("cache", "dagendroognat.rds" ))}
+```{r rollend-gemiddelde, eval = !file.exists(file.path("data","local", "dagendroognat.rds" ))}
 #berekenen van rollende gemiddelden
 
 modeldata <- dagen_droog_nat %>% 
   group_by(meetpunt, simulatienr) %>% 
   arrange(jaar) %>% 
-  summarise(dag_onder_p05.0 = dag_onder_p05,
+  reframe(dag_onder_p05.0 = dag_onder_p05,
             dag_onder_p05.2 = movavg(dag_onder_p05, n = 2, "w"), #rollend gem, gewogen waarbij de gewichten een lin. trend volgen
             dag_onder_p05.4 = movavg(dag_onder_p05, n = 4, "w"),
             dag_onder_p05.6 = movavg(dag_onder_p05, n = 6, "w"),
@@ -631,8 +851,8 @@ dagen_droog_nat <- dagen_droog_nat %>%
   inner_join(modeldata)
 
 #wegschrijven in een RDS-bestand
-saveRDS(dagen_droog_nat,file.path("cache", "dagendroognat.rds" ))
-saveRDS(modeldata,file.path("cache", "modeldata.rds" ))
+saveRDS(dagen_droog_nat,file.path("data", "local", "dagendroognat.rds" ))
+saveRDS(modeldata,file.path("data", "local", "modeldata.rds" ))
 ```
 
 ```{r abs-indicator-uit-cache}
@@ -912,10 +1132,10 @@ standardised <- FALSE
 respons.f <- function(indicatorname, percentile, standardised = FALSE){paste0(indicatorname, percentile, if (standardised == TRUE) ("_std"))}
 
 respons <- respons.f("dag_onder_p", percentile = "05")
-workflow <- "nietrekenen"
+workflow <- "rekenen"
 ```
 
-```{r abs-indic-model-without-trend-droog, eval = !file.exists(file.path("cache", paste0("modelresultaat_geentrend.rds")))}
+```{r abs-indic-model-without-trend-droog, eval = !file.exists(file.path("data","local", paste0("modelresultaat_geentrend.rds"))) | workflow == "rekenen"}
 #bij een eventuele herberekening moet de velden met de rekenresultaten eerst verwijderd worden
 dagen_droog_nat <- dagen_droog_nat %>% 
   dplyr::select(-contains("fitted") )
@@ -923,7 +1143,7 @@ dagen_droog_nat <- dagen_droog_nat %>%
 modelkeuze <- data.frame(percentiel = c("01", "05", "10", "30", "95" ), model = c("zeroinflatednbinomial2", "zeroinflatednbinomial0", "zeroinflatednbinomial0", "nbinomial", "zeroinflatednbinomial0"))
 modelkeuze$model <- as.character(modelkeuze$model)
 
-dagen_droog_nat <- indic_abs_function_without_trend(modeldata = modeldata, respons = respons, percentile = percentile, standardised = standardised, cache = "cache" )
+dagen_droog_nat <- indic_abs_function_without_trend(modeldata = modeldata, respons = respons, percentile = percentile, standardised = standardised, cache = paste0("data/local") )
 
 workflow <- "rekenen"
 
@@ -939,13 +1159,13 @@ respons <- respons.f("dag_boven_p", percentile = "95")
 ```
 
 
-```{r abs-indic-model-without-trend-nat, eval = !file.exists(file.path("cache", paste0("modelresultaat_geentrend.rds"))) | workflow == "rekenen"}
-dagen_droog_nat <- indic_abs_function_without_trend(modeldata = modeldata, respons = respons, percentile = percentile, standardised = standardised, cache = "cache" )
+```{r abs-indic-model-without-trend-nat, eval = !file.exists(file.path("data", "local" paste0("modelresultaat_geentrend.rds"))) | workflow == "rekenen"}
+dagen_droog_nat <- indic_abs_function_without_trend(modeldata = modeldata, respons = respons, percentile = percentile, standardised = standardised, cache = paste0("data/local") )
 ```
 
 
 ```{r abs-indic-model-without-trend-uit-cache, include=FALSE}
-dagen_droog_nat <- readRDS(file.path("cache", paste0("modelresultaat_geentrend.rds" ) ))
+dagen_droog_nat <- readRDS(file.path("data", "local", paste0("modelresultaat_geentrend.rds" ) ))
 
 for (ma in tijdvenster) {
   respons <- paste0(".", ma, "_", respons.f("dag_onder_p", percentile = "05"))
@@ -1063,6 +1283,16 @@ nat_basis_05 <- nat_basis_05 %>%
   )  
 ```
 
+```{r droogte-indicator, include=FALSE, eval = FALSE}
+droogte_ind_j <- dagen_droog_nat %>% 
+  group_by(jaar) %>% 
+  summarise(droogte_ind_j = mean(dag_onder_p05)
+            ) %>% 
+  ungroup()
+
+```
+
+
 ```{r nat-indicator, include=FALSE, eval = FALSE}
 nat_ind_j <- dagen_droog_nat %>% 
   group_by(jaar) %>% 
@@ -1153,7 +1383,7 @@ write_vc(nat_basis_05, file.path("data", "result", "nat_indicator"), sorting = c
 
 Onderstaande tabel geeft de berekende indicator-waarden inclusief het 95% betrouwbaarheidsinterval (CI).
 
-```{r droogte-indicator-ci-tbl, include = TRUE, fig.cap="Droogte-indicator inclusief p05-95-betrouwhaarheidsinterval 1985 - 2018"}
+```{r droogte-indicator-ci-tbl, include = TRUE, fig.cap="Droogte-indicator inclusief p05-95-betrouwhaarheidsinterval 1985 - 2022"}
 dt <- droogte_basis_05
 row.names(dt) <- NULL
 dt <-  dt %>% 
@@ -1168,7 +1398,7 @@ dt <-  dt %>%
 if (interactive() || opts_knit$get("rmarkdown.pandoc.to") == "html") {
 # code for interactive (html) output
   DT::datatable(dt,
-  caption = "Droogte-indicator inclusief p05-95 betrouwhaarheidsinterval (CI) 1985 - 2018"
+  caption = "Droogte-indicator inclusief p05-95 betrouwhaarheidsinterval (CI) 1985 - 2022"
   ) %>% 
   DT::formatRound(columns = 1:3,
                   digits = 1)
@@ -1178,7 +1408,7 @@ if (interactive() || opts_knit$get("rmarkdown.pandoc.to") == "html") {
   mutate_at(1:3, format, digits = 1, nsmall = 0) %>% 
   kbl(longtable = TRUE,
       booktabs = TRUE,      
-      caption = "Droogte-indicator inclusief p05-95 betrouwhaarheidsinterval (CI) 1985 - 2018",
+      caption = "Droogte-indicator inclusief p05-95 betrouwhaarheidsinterval (CI) 1985 - 2022",
       align = c("l", rep("r",3))
       ) %>% 
   kable_styling(full_width = FALSE, 
@@ -1302,23 +1532,24 @@ droogte_ind_j_s <- dagen_droog_ma %>%
   ungroup()
 
 droogte_ind_j_var <- droogte_ind_j_s %>% 
-  inner_join(droogte_ind_j_ma) %>% 
+  inner_join(droogte_ind_j_ma, by = join_by(jaar, tijdvenster)) %>% 
   group_by(jaar, tijdvenster) %>% 
   summarise(dagen_droog_gem_var = mean(dagen_droog_se^2),
-            aantalsim= n(),
-            imput_var = (1+1/aantalsim) * sum((droogte_ind_j_s - droogte_ind_j)^2/(aantalsim-1)),
+            aantalsim = n(),
+            imput_var = (1 + 1/aantalsim) * sum((droogte_ind_j_s - droogte_ind_j)^2/(aantalsim - 1)),
             droogte_ind_j_var = dagen_droog_gem_var + imput_var
             ) %>% 
   ungroup() %>% 
   dplyr::select (-aantalsim)
 
 droogte_ind_j_var <- droogte_ind_j_var %>% 
-  mutate (rel_bijdrage_imput = round(imput_var/droogte_ind_j_var*100,0))
+  mutate(rel_bijdrage_imput = round(imput_var/droogte_ind_j_var*100,0))
 
 
 droogte_ind_j_ma <- droogte_ind_j_ma %>% 
   inner_join(droogte_ind_j_var %>% 
-               dplyr::select(-starts_with(c("dagen", "imput", "rel")))) %>% 
+               dplyr::select(-starts_with(c("dagen", "imput", "rel"))),
+             by = join_by(jaar, tijdvenster)) %>% 
   mutate(lcl = droogte_ind_j - 1.96*sqrt(droogte_ind_j_var),
          ucl = droogte_ind_j + 1.96*sqrt(droogte_ind_j_var)
          )
@@ -1348,11 +1579,11 @@ nat_ind_j_s <- dagen_nat_ma %>%
   ungroup()
 
 nat_ind_j_var <- nat_ind_j_s %>% 
-  inner_join(nat_ind_j_ma) %>% 
+  inner_join(nat_ind_j_ma, by = join_by(jaar, tijdvenster)) %>% 
   group_by(jaar, tijdvenster) %>% 
   summarise(dagen_nat_gem_var = mean(dagen_nat_se ^ 2),
             aantalsim = n(),
-            imput_var = (1 + 1/aantalsim) * sum((nat_ind_j_s - nat_ind_j)^2/(aantalsim-1)),
+            imput_var = (1 + 1/aantalsim) * sum((nat_ind_j_s - nat_ind_j)^2/(aantalsim - 1)),
             nat_ind_j_var = dagen_nat_gem_var + imput_var
             ) %>% 
   ungroup() %>% 
@@ -1364,7 +1595,8 @@ nat_ind_j_var <- nat_ind_j_var %>%
 
 nat_ind_j_ma <- nat_ind_j_ma %>% 
   inner_join(nat_ind_j_var %>% 
-               dplyr::select(-starts_with(c("dagen", "imput", "rel")))) %>% 
+               dplyr::select(-starts_with(c("dagen", "imput", "rel"))),
+             by = join_by(jaar, tijdvenster)) %>% 
   mutate(lcl = nat_ind_j - 1.96*sqrt(nat_ind_j_var),
          ucl = nat_ind_j + 1.96*sqrt(nat_ind_j_var)
          )
@@ -1840,7 +2072,7 @@ indic_abs_function_Rubin <- function(modeldata, suffix= "", respons, percentile,
       teller <- teller + 1
       I2 <- inla(model_free, 
                         control.compute = list(dic = TRUE, waic = TRUE, cpo = TRUE),
-                        #lincomb = lc,
+                        lincomb = lc,
                         family = modelkeuze %>% filter(percentiel == percentile) %>% 
                                 dplyr::pull(model), 
                         data = mdata
@@ -2070,13 +2302,13 @@ indic_abs_function <- function(modeldata, suffix= "", respons, percentile, indic
     resultname_stat_meetpunt <- paste0("indic_abs_p", percentile,".", ma, suffix, "_meetpunt_stat", if (standardised == TRUE) ("_std"))
     resultname_mov.average <- paste0("indic_abs_p", percentile,".", ma, suffix, "_mov.average_stat", if (standardised == TRUE) ("_std"))
     resultname_fitted <- paste0("indic_abs_p", percentile,".", ma, suffix, "_fitted", if (standardised == TRUE) ("_std"))
-    # if (percentile == "01") {
-    #   reeks <- c(1:20) #1 model wou maar niet convergeren
-    # } else {
-    #   reeks <- c(1:20)    
-    # }  
-    # teller <- 0
-    # for (i in reeks) {
+    if (percentile == "01") {
+      reeks <- c(1:20) #1 model wou maar niet convergeren
+    } else {
+      reeks <- c(1:20)
+    }
+    teller <- 0
+    for (i in reeks) {
       #i = 16
       
       #samenstellen van een tweeledig dataframe. De eerste 34 + 58 rijen (#jaren en #meetlocaties) zijn leeg en dienen om de gemiddelde waarden en de bijhorende fouten te berekenen. Het tweede deel dient om het model mee te bouwen    
@@ -2230,7 +2462,7 @@ indic_abs_function <- function(modeldata, suffix= "", respons, percentile, indic
                         dplyr::select(contains("fitted"), 1:3), 
                       by = c("meetpunt","simulatienr", "jaar")) 
       
-    
+    }
     #opslaan van de intermediaire tabellen en resultaat als rds-bestand
     tabellen_lijst_rds <- list( 
             naamdoeltabel = file.path(cache, paste0(c(resultname_stat, resultname_stat_meetpunt, resultname_mov.average, resultname_fitted), ".rds")),
@@ -2253,30 +2485,42 @@ indic_abs_function <- function(modeldata, suffix= "", respons, percentile, indic
 dagen_droog_bu <- dagen_droog_nat 
 ```
 
+```{r model-parameters-droog2, include=FALSE}
+#keuze van parameters
+percentile <- "05"
+# indicatorname <- paste0("dag_onder_p",percentile)
+# indicatorname_inv <- paste0("dag_boven_p",percentile)
+standardised <- FALSE
+respons.f <- function(indicatorname, percentile, standardised = FALSE){paste0(indicatorname, percentile, if (standardised == TRUE) ("_std"))}
 
-```{r abs-indic-model, include=FALSE, eval = !file.exists(file.path("cache", paste0("modelresultaat_", respons, ".rds" )))}
-#bij een eventuele herberekening moet de velden met de rekenresultaten eerst verwijderd worden
+respons <- respons.f("dag_onder_p", percentile = "05")
+workflow <- "rekenen"
+```
+
+
+```{r abs-indic-model, include=FALSE, eval = !file.exists(file.path("data","local", paste0("modelresultaat_", respons, ".rds" )))}
+#bij een eventuele herberekening moeten de velden met de rekenresultaten eerst verwijderd worden
 dagen_droog_nat <- dagen_droog_nat %>% 
   dplyr::select(-contains("fitted") )
 
 modelkeuze <- data.frame(percentiel = c("01", "05", "10", "30" ), model = c("zeroinflatednbinomial2", "zeroinflatednbinomial0", "zeroinflatednbinomial0", "nbinomial"))
 modelkeuze$model <- as.character(modelkeuze$model)
-
-dagen_droog_nat <- indic_abs_function(modeldata = modeldata, respons = respons, percentile = percentile, indicatorname = indicatorname, standardised = standardised, cache = "cache", tijdvenster = 0 )
+# debugonce(indic_abs_function)
+dagen_droog_nat <- indic_abs_function_Rubin(modeldata = modeldata, respons = respons, percentile = percentile, indicatorname = indicatorname, standardised = standardised, cache = paste0("data/local"), tijdvenster = tijdvenster )
 
 ```
 
 ```{r abs-indic-model-droog-uit-cache, include=FALSE}
-dagen_droog_update <- readRDS(file.path("cache", paste0("modelresultaat_", respons, ".rds" ) ))
+dagen_droog_nat <- readRDS(file.path("data", "local", paste0("modelresultaat_", respons, ".rds" ) ))
 for (ma in tijdvenster) {
-  namen_intermediaire_tabellen <- readRDS(file.path("cache", paste0("model_namen_intermediair.",ma,"_",respons, ".rds" ) ))
+  namen_intermediaire_tabellen <- readRDS(file.path("data", "local", paste0("model_namen_intermediair.",ma,"_",respons, ".rds" ) ))
   for (i in 1:length(namen_intermediaire_tabellen)) {
-    assign(namen_intermediaire_tabellen[i], readRDS(paste0(file.path("cache", namen_intermediaire_tabellen[i]), ".rds" )))
+    assign(namen_intermediaire_tabellen[i], readRDS(paste0(file.path("data", "local", namen_intermediaire_tabellen[i]), ".rds" )))
   }
 }
 ```
 
-```{r model-parameters-nat, include=FALSE}
+```{r model-parameters-nat2, include=FALSE}
 #keuze van parameters
 percentile <- "95"
 indicatorname <- paste0("dag_boven_p",percentile)
@@ -2285,23 +2529,23 @@ respons <- paste0(indicatorname, if (standardised == TRUE) ("_std"))
 ```
 
 
-```{r abs-indic-model-nat, include=FALSE, eval = !file.exists(file.path("cache", paste0("modelresultaat_", respons, ".rds" )))}
+```{r abs-indic-model-nat, include=FALSE, eval = !file.exists(file.path("data", "local", paste0("modelresultaat_", respons, ".rds" )))}
 #bij een eventuele herberekening moet de velden met de rekenresultaten eerst verwijderd worden
 
 modelkeuze <- data.frame(percentiel = c("01", "05", "10", "30", "95" ), model = c("zeroinflatednbinomial2", "zeroinflatednbinomial0", "zeroinflatednbinomial0", "nbinomial","zeroinflatednbinomial0"))
 modelkeuze$model <- as.character(modelkeuze$model)
 
-dagen_droog_nat <- indic_abs_function(modeldata = modeldata, respons = respons, percentile = percentile, indicatorname = indicatorname, standardised = standardised, cache = "cache", tijdvenster = tijdvenster)
+dagen_droog_nat <- indic_abs_function_Rubin(modeldata = modeldata, respons = respons, percentile = percentile, indicatorname = indicatorname, standardised = standardised, cache = paste0("data/local"), tijdvenster = tijdvenster)
 
 ```
 
 
 ```{r abs-indic-model-nat-uit-cache, include=FALSE}
-dagen_droog_update <- readRDS(file.path("cache", paste0("modelresultaat_", respons, ".rds" ) ))
+dagen_droog_nat <- readRDS(file.path("data", "local", paste0("modelresultaat_", respons, ".rds" ) ))
 for (ma in tijdvenster) {
   namen_intermediaire_tabellen <- readRDS(file.path("cache", paste0("model_namen_intermediair.",ma,"_",respons, ".rds" ) ))
   for (i in 1:length(namen_intermediaire_tabellen)) {
-    assign(namen_intermediaire_tabellen[i], readRDS(paste0(file.path("cache", namen_intermediaire_tabellen[i]), ".rds" )))
+    assign(namen_intermediaire_tabellen[i], readRDS(paste0(file.path("data", "local", namen_intermediaire_tabellen[i]), ".rds" )))
   }
 }
 ```
@@ -2309,14 +2553,14 @@ for (ma in tijdvenster) {
 ```{r trend-data-nat-vc, include=FALSE}
 
 #bewaren resultaat
-write_vc(dagen_droog_update, file.path("data", "result", "dagen_droog_nat"), sorting = c("jaar", "meetpunt", "simulatienr"), strict = FALSE)
+write_vc(dagen_droog_nat, file.path("data", "result", "dagen_droog_nat"), sorting = c("jaar", "meetpunt", "simulatienr"), strict = FALSE)
 
 ```
 
 ```{r trend-droog-rubin, message=FALSE, warning=FALSE, include=FALSE}
 
 #berekenen van indicator
-indic_abs_droog_gem <- dagen_droog_update %>% 
+indic_abs_droog_gem <- dagen_droog_nat %>% 
   group_by(jaar) %>% 
   summarise_at(vars(starts_with("dag_onder_p05.")), list(gem = mean, med = median)) %>% 
   ungroup
@@ -2357,7 +2601,7 @@ for (ma in tijdvenster) {
               bg_jaar = exp(bg_jaar_t)
     ) %>%
     ungroup() %>%
-    bind_rows(droogte_ind_j_ma %>% filter (tijdvenster == ma)) %>%
+    bind_rows(droogte_ind_j_ma %>% filter(tijdvenster == ma)) %>%
     mutate(tijdvenster = ma)
 
   if (teller == 1) {
@@ -2373,7 +2617,7 @@ for (ma in tijdvenster) {
 ```{r trend-nat-rubin, message=FALSE, warning=FALSE, include=FALSE}
 
 #berekenen van indicator
-indic_abs_nat_gem <- dagen_droog_update %>% 
+indic_abs_nat_gem <- dagen_droog_nat %>% 
   group_by(jaar) %>% 
   summarise_at(vars(starts_with("dag_boven_p95.")), list(gem = mean, med = median)) %>% 
   ungroup
@@ -2414,7 +2658,7 @@ for (ma in tijdvenster) {
               bg_jaar = exp(bg_jaar_t)
     ) %>%
     ungroup() %>%
-    bind_rows(nat_ind_j_ma %>% filter (tijdvenster == ma)) %>%
+    bind_rows(nat_ind_j_ma %>% filter(tijdvenster == ma)) %>%
     mutate(tijdvenster = ma)
 
   if (teller == 1) {
@@ -2430,12 +2674,12 @@ for (ma in tijdvenster) {
 Figuur \@ref(fig:trend-fitting-droog-fig) geeft het resultaat van de modelbouw. 
 Het model schat o.a. voor elk meetpunt het verwachte aantal droge dagen per jaar en wat de betrouwbaarheid van deze schatting is.
 De figuur toont de zowel de werkelijke waarden (licht blauwe punten) als de door het model geschatte gemiddelde waarden (rode lijn) met hun betrouwbaarheidsinterval. 
-De verticale rode lijnen geeft het bereik van het geschatte verwachte aantal droge dagen per jaar voor de 58 locaties. 
+De verticale rode lijnen geven het bereik van het geschatte verwachte aantal droge dagen per jaar voor de 58 locaties. 
 
 
 ```{r trend-fitting-droog-fig-save, message=FALSE, warning=FALSE, include=FALSE}
 #tabel met de indicatorwaarden (rollend gemiddelden) en trend berekening (model) omvormen naar een lange versie
-dagen_droog_lang_breed <- dagen_droog_update %>% 
+dagen_droog_lang_breed <- dagen_droog_nat %>% 
   pivot_longer(cols = starts_with("p05."), names_to = "statistiek", values_to = "waarde") %>% 
   mutate(tijdvenster = as.integer(substr(statistiek, 4 + 1,  str_locate(string = statistiek, pattern = "_") - 1)),
           statistiek = paste0(substr(statistiek,1,3), str_sub(statistiek, start = str_locate(string = statistiek, pattern = "_")[,1], -1)
@@ -2466,7 +2710,7 @@ fig
 
 ```{r trend-fitting-nat-fig-save, message=FALSE, warning=FALSE, include=FALSE}
 #tabel met de indicatorwaarden (rollend gemiddelden) en trend berekening (model) omvormen naar een lange versie
-dagen_nat_lang_breed <- dagen_droog_update %>% 
+dagen_nat_lang_breed <- dagen_droog_nat %>% 
   pivot_longer(cols = starts_with("p95."), names_to = "statistiek", values_to = "waarde") %>% 
   mutate(tijdvenster = as.integer(substr(statistiek, 4 + 1,  str_locate(string = statistiek, pattern = "_") - 1)),
           statistiek = paste0(substr(statistiek,1,3), str_sub(statistiek, start = str_locate(string = statistiek, pattern = "_")[,1], -1)
@@ -2538,6 +2782,9 @@ gplot <- plottrend.1venster(droogte_trend_05,"droogte_ind_j", intercept = 18, ti
 png(paste0(file.path("data","result", "figures","dagen-droog-p05"),"-trend-origineel",".png"), width = 1500, height = 1500, res = 150)
 gplot
 dev.off()
+gplot <- plottrend.1venster(droogte_trend_05,"droogte_ind_j", 18, tijdvenster = 6, yrechts = "droogte-indicator")
+png(paste0(file.path("data","result", "figures","dagen-droog-p05"),"-trend-6jaar",".png"), width = 1500, height = 1500, res = 150)
+gplot
 gplot <- plottrend.1venster(droogte_trend_05,"droogte_ind_j", 18, tijdvenster = 8, yrechts = "droogte-indicator")
 png(paste0(file.path("data","result", "figures","dagen-droog-p05"),"-trend-8jaar",".png"), width = 1500, height = 1500, res = 150)
 gplot
@@ -2550,6 +2797,10 @@ gplot <- plottrend.1venster(nat_trend_95,"nat_ind_j", intercept = 18, tijdvenste
 png(paste0(file.path("data","result", "figures","dagen-nat-p95"),"-trend-origineel",".png"), width = 1500, height = 1500, res = 150)
 gplot
 dev.off()
+gplot <- plottrend.1venster(nat_trend_95,"nat_ind_j", 18, tijdvenster = 6, yrechts = "nat-indicator")
+png(paste0(file.path("data","result", "figures","dagen-nat-p95"),"-trend-6jaar",".png"), width = 1500, height = 1500, res = 150)
+gplot
+dev.off()
 gplot <- plottrend.1venster(nat_trend_95,"nat_ind_j", 18, tijdvenster = 8, yrechts = "nat-indicator")
 png(paste0(file.path("data","result", "figures","dagen-nat-p95"),"-trend-8jaar",".png"), width = 1500, height = 1500, res = 150)
 gplot
@@ -2559,32 +2810,35 @@ dev.off()
 
 ```{r trend-droog-vc, include=FALSE}
 #bewaren resultaten
-write_vc(droogte_trend_05, file.path("data", "result", "droogte_trend_05"), sorting = c("jaar", "tijdvenster"), root = projroot)
+write_vc(droogte_trend_05, file.path("data", "result", "droogte_trend_05"), sorting = c("jaar", "tijdvenster"), root = projroot, strict = FALSE)
 
 dagen_droog_lang_breed <- dagen_droog_lang_breed %>% 
   dplyr::select(-contains(c("boven", "p95")))
-write_vc(dagen_droog_lang_breed, file.path("data", "result", "droogte_fitting_05"), sorting = c("meetpunt", "jaar", "simulatienr", "tijdvenster"), root = projroot)
+write_vc(dagen_droog_lang_breed, file.path("data", "result", "droogte_fitting_05"), sorting = c("meetpunt", "jaar", "simulatienr", "tijdvenster"), root = projroot, strict = FALSE)
 ```
 
 ```{r trend-nat-vc, include=FALSE}
 #bewaren resultaten
-write_vc(nat_trend_95, file.path("data", "result", "nat_trend_05"), sorting = c("jaar", "tijdvenster"), root = projroot)
+write_vc(nat_trend_95, file.path("data", "result", "nat_trend_05"), sorting = c("jaar", "tijdvenster"), root = projroot, strict = FALSE)
 
 dagen_nat_lang_breed <- dagen_nat_lang_breed %>% 
   dplyr::select(-contains(c("onder", "p05")))
-write_vc(dagen_nat_lang_breed, file.path("data", "result", "nat_fitting_95"), sorting = c("meetpunt", "jaar", "simulatienr", "tijdvenster"), root = projroot)
+write_vc(dagen_nat_lang_breed, file.path("data", "result", "nat_fitting_95"), sorting = c("meetpunt", "jaar", "simulatienr", "tijdvenster"), root = projroot, strict = FALSE)
 ```
 
 
 ```{r trend-droog-csv-voor-nara, include=FALSE}
 #bewaren data voor figuur in nara
+
 write_csv(droogte_trend_05 %>% 
             dplyr::select(jaar, gem_jaar, og_jaar, bg_jaar, droogte_ind_j, lcl, ucl, tijdvenster) %>% 
             rename(`aantal dagen onder kritisch minimum` = droogte_ind_j,
                    og_jaar_trend =  og_jaar,
                    bg_jaar_trend = bg_jaar,
                    og_jaar_indicator = lcl,
-                   bg_jaar_indicator = ucl), file.path("data", "result", "figuur_droog_nara.csv"))
+                   bg_jaar_indicator = ucl), file.path("data", "result",
+                                                       paste0("figuur_droog_nara_",
+                                                              year(Sys.time()),".csv")))
 ```
 
 
@@ -2596,7 +2850,9 @@ write_csv(nat_trend_95 %>%
                    og_jaar_trend =  og_jaar,
                    bg_jaar_trend = bg_jaar,
                    og_jaar_indicator = lcl,
-                   bg_jaar_indicator = ucl), file.path("data", "result", "figuur_nat_nara.csv"))
+                   bg_jaar_indicator = ucl), file.path("data", "result", 
+                                                       paste0("figuur_droog_nara_",
+                                                              year(Sys.time()),".csv")))
 ```
 
 

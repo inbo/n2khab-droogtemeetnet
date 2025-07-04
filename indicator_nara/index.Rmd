@@ -1,42 +1,80 @@
 ---
-title: "Een indicator voor het opvolgen van droogte in ondiepe grondwaterlagen binnen natuurgebieden"
+title: "Een indicator voor het opvolgen van droogte in ondiepe grondwaterlagen binnen natuurgebieden - 2024"
+subtitle: 
 author: 
-  - 
-    name: "Jan Wouters"
-    email: "jan.wouters@inbo.be"
-  - 
-    name: "Floris Vanderhaeghe"
-    email: "floris.vanderhaeghe@inbo.be"
-  - 
-    name: "Thierry Onkelinx"
-    email: "thierry.onkelinx@inbo.be"    
-#subtitle: "Hier komt de optionele ondertitel"
-reportnr: "doi.org/10.21436/inbor.39482098"
-# ordernr: "Het optionele nummer van de opdrachtgever"
-bibliography: bib_indicator_nara.bib
-link-citations: TRUE
+  - name:
+      given: Jan
+      family: Wouters
+    email: jan.wouters@inbo.be
+    orcid: 0000-0001-8200-9102
+    affiliation: Research Institute for Nature and Forest (INBO)
+    corresponding: true
+  - name:
+      given: Floris
+      family: Vanderhaeghe
+    email: floris.vanderhaeghe@inbo.be
+    affiliation: Research Institute for Nature and Forest (INBO)
+    orcid: 0000-0002-6378-6229
+  - name:
+      given: Thierry
+      family: Onkelinx
+    email: thierry.onkelinx@inbo.be
+    orcid: 0000-0001-8804-4216
+    affiliation: Research Institute for Nature and Forest (INBO)
+reviewer:
+  - name:
+      given: Katrijn
+      family: Alaerts
+    email: katrijn.alaerts@inbo.be
+    affiliation: Research Institute for Nature and Forest (INBO)
+    orcid: 0000-0003-0228-8506
+github-repo: inbo/n2khab-droogtemeetnet
+year: 2024
+#cover_photo: https://www.pexels.com/nl-nl/foto/hout-natuur-rood-creatief-4599227
+#cover_description: Detail van een blad. Foto door [Skyler Ewing](https://www.pexels.com/nl-nl/@skyler-ewing-266953?utm_content=attributionCopyText&utm_medium=referral&utm_source=pexels) via [Pexels](https://www.pexels.com/nl-nl/foto/hout-natuur-rood-creatief-4599227/?utm_content=attributionCopyText&utm_medium=referral&utm_source=pexels)
+#cover: media/cover.pdf # link naar pdf met cover
+#doi: 10.5281/zenodo.842223
+#reportnr: 99999
+#depotnr: D/2021/999999/999999
+#ordernr: Het optionele nummer van de opdrachtgever
+funder: Research Institute for Nature and Forest (INBO) 
+rightsholder: Research Institute for Nature and Forest (INBO)
+community: inbo
+keywords: verdroging;NARA;klimaat;indicator
+publication_type: report
+#embargo: 2024-06-01
+client:
+  - INBO Brussel
+  - VAC Brussel ‐ Herman Teirlinck
+  - Havenlaan 88 bus 73
+  - 1000 Brussel
+  - https://www.vlaanderen.be/inbo
+client_logo: media/logo.jpg
+cooperation:
+  - INBO Brussel
+  - VAC Brussel ‐ Herman Teirlinck
+  - Havenlaan 88 bus 73
+  - 1000 Brussel
+  - https://www.vlaanderen.be/inbo
+cooperation_logo: media/logo.jpg
+style: INBO
+lang: nl
+lot: TRUE
+lof: TRUE
+
 site: bookdown::bookdown_site
+link-citations: TRUE
+bibliography: bib_indicator_nara.bib
+
 params:
   refresh_data: 2
   refresh_figures: 2
+
 output:
-  bookdown::gitbook:
-    split_by: "chapter+number"
-    template: !expr INBOmd::inbo_rapport_css("html")
-    pandoc_args: !expr c("--csl", system.file("research-institute-for-nature-and-forest.csl", package = "INBOmd"))
-  bookdown::pdf_book:
-    base_format: INBOmd::inbo_rapport
-    citation_package: "none"
-    #base_format: mijneerstepackage::inbo_rapport_jw
-    style: INBO
-    tocdepth: 2
-    lof: TRUE
-    lot: TRUE
-    floatbarrier: subsection
-  bookdown::epub_book:
-    stylesheet: "css/inbo_rapport.css"
-    template: !expr INBOmd::inbo_rapport_css("epub")
-    pandoc_args: !expr c("--csl", system.file("research-institute-for-nature-and-forest.csl", package = "INBOmd"))
+  INBOmd::gitbook: default
+  INBOmd::pdf_report: default
+  INBOmd::epub_book: default
+  bookdown::dont_run: default
 ---
 
 

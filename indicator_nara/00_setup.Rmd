@@ -19,6 +19,9 @@ library(car)
 library(lme4)
 library(INLA)
 
+conflicted::conflicts_prefer(dplyr::select)
+conflicted::conflicts_prefer(dplyr::filter)
+
 # ingesteld in index.Rmd
 # output_format <- ifelse(
 #   interactive(),

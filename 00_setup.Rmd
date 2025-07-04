@@ -34,6 +34,9 @@ library(googledrive)
 options(gargle_oauth_email = TRUE)
 library(RSQLite) 
 
+conflicted::conflicts_prefer(dplyr::filter)
+conflicted::conflicts_prefer(dplyr::select)
+
 output_format <- ifelse(
   interactive(),
   "html",
@@ -103,6 +106,277 @@ bufferpb <- 3
 #uitgesloten_tubes <- c("MOSP001", "HALP005", "BUIP027")
 uitgesloten_tubes <- c("HAGP018", "WALP101") #pb van een peilbuiskoppel
 
+```
+
+```{r functies, include=FALSE}
+
+# UNION met QGIS-algoritmes dmv het qgisprocess-package
+# Controleert het overlappen tussen objecten op de invoerlaag en maakt afzonderlijke objecten voor overlappende en niet-overlappende gedeelten. Het gebied van het overlappen zal net zoveel identieke overlappende objecten maken als er objecten zijn die deel uitmaken van het overlappen.
+# https://docs.qgis.org/3.22/nl/docs/user_manual/processing_algs/qgis/vectoroverlay.html#union
+qg_union <- function(input, overlay) {
+  stopifnot(require("qgisprocess"))
+
+  output_union <- qgis_run_algorithm("native:union", INPUT = input, OVERLAY = overlay)
+  
+  qg_output <- sf::read_sf(qgis_output(output_union, "OUTPUT"))
+  
+  qg_output_fix <- qgis_run_algorithm("native:fixgeometries", INPUT = qg_output)  
+  
+  qg_output <- sf::read_sf(qgis_output(qg_output_fix, "OUTPUT"))
+  
+  if ("fid_2" %in% colnames(qg_output)) {
+    qg_output <- qg_output %>% dplyr::select(-c(fid_2))    
+  }
+  return(qg_output)
+}
+
+# BUFFEREN met QGIS-algoritmes dmv het qgisprocess-package
+# Berekent een buffergebied met een vaste afstand voor alle objecten op een invoerlaag.
+# Buffert in één richting. Het is mogelijk een negatieve afstand te gebruiken voor invoerlagen polygoon. In dat geval zal de buffer resulteren in een kleinere polygoon (setback).
+# https://docs.qgis.org/3.22/nl/docs/user_manual/processing_algs/qgis/vectorgeometry.html#buffer
+# Het is niet (denk ik toch) mogelijk om variabele bufferafstanden (via een variabele) door te geven.
+
+qg_buffer <- function(input, bufferafstand, samensmelten = FALSE) {
+  if ("qgisprocess" %in% (.packages()) == FALSE) {
+    library("qgisprocess") 
+  }
+  
+  output_buffer <- qgis_run_algorithm("native:buffer", INPUT = input, DISTANCE = bufferafstand, DISSOLVE =  samensmelten)
+    
+  qg_output <- sf::read_sf(qgis_output(output_buffer, "OUTPUT"))
+  
+  qg_output_fix <- qgis_run_algorithm("native:fixgeometries", INPUT = qg_output)    
+  qg_output <- sf::read_sf(qgis_output(qg_output_fix, "OUTPUT"))
+  return(qg_output)  
+}
+
+# INTERSECTIE met QGIS-algoritmes dmv het qgisprocess-package
+# Neemt delen van objecten van de invoerlaag uit die objecten op de overleglaag overlappen.
+# https://docs.qgis.org/3.22/nl/docs/user_manual/processing_algs/qgis/vectoroverlay.html#intersection
+qg_intersect <- function(input, overlay) {
+  if ("qgisprocess" %in% (.packages()) == FALSE) {
+    library("qgisprocess") 
+  }  
+  output_intersect <- qgis_run_algorithm("native:intersection", INPUT = input, OVERLAY = overlay)
+  
+  qg_output <- sf::read_sf(qgis_output(output_intersect, "OUTPUT"))
+  
+  qg_output_fix <- qgis_run_algorithm("native:fixgeometries", INPUT = qg_output)    
+  qg_output <- sf::read_sf(qgis_output(qg_output_fix, "OUTPUT")) %>% dplyr::select(-c(fid_2))  
+}
+
+# SAMENSMELTEN/DISSOLVE met QGIS-algoritmes dmv het qgisprocess-package
+# Neemt delen van objecten van de invoerlaag uit die objecten op de overleglaag overlappen.
+# https://docs.qgis.org/3.28/nl/docs/user_manual/processing_algs/qgis/vectorgeometry.html#dissolve
+qg_dissolve <- function(input, veld) {
+  if ("qgisprocess" %in% (.packages()) == FALSE) {
+    library("qgisprocess") 
+  }  
+  output_dissolve <- qgis_run_algorithm("native:dissolve", INPUT = input, FIELD = veld)
+  
+  qg_output <- sf::read_sf(qgis_output(output_dissolve, "OUTPUT"))
+  
+  qg_output_fix <- qgis_run_algorithm("native:fixgeometries", INPUT = qg_output)    
+  qg_output <- sf::read_sf(qgis_output(qg_output_fix, "OUTPUT"))   
+}
+
+# inspectie data
+# functie waarmee de data(structuur) wordt gevisualiseerd
+inspectie <- function(data, gis = FALSE, gis_sample = FALSE, sample_prop = 0.01, welke_gisattributen = 1, hoeveel_records = c("alle", "head", "glimpse"), kader = NULL, interactief = TRUE, legende.tonen = TRUE, aantal_klassen = 5, facets = NULL) {
+  require("sf")
+  require("tmap")
+
+  if (!interactief) require("OpenStreetMap")
+  if (length(hoeveel_records) != 1) hoeveel_records <- "head"  
+  if (!hoeveel_records %in% c("alle", "head", "glimpse")) hoeveel_records <- "head"
+  if (is.null(hoeveel_records)) hoeveel_records <- "head"
+  if (!is.null(kader) & length(kader) != 4 )  kader <- c(228700,193700,230800,195200)
+  naam_object <- deparse(substitute(data))
+  cat("naam object : ", naam_object, "\n")
+  
+  print(summary(data))
+
+  if (gis) {
+    # instellen opties (want blijkbaar kan bij het croppen wat fout gaan.)
+    tmap::tmap_options(show.warnings = FALSE, show.messages = FALSE, check.and.fix = TRUE)
+    
+    # nakijken welke geometrie het bevat
+    geometrie <- case_when(
+      str_detect(st_geometry_type(data)[1], pattern = "POINT") ~ "punt",
+      str_detect(st_geometry_type(data)[1], pattern = "LINE") ~ "lijn",
+      TRUE ~ "vlak"
+      )
+    
+    # alleen de kolommen behouden die gespecifieerd werden (standaard is dit de eerste kolom)
+    if (is.null(facets)) {
+      dataselect <- data %>% 
+        dplyr::select(all_of(welke_gisattributen))
+    } else {
+      dataselect <- data %>% 
+        dplyr::select(all_of(welke_gisattributen), all_of(facets))
+      # dataselect <- data %>% 
+      #   dplyr::select(all_of(welke_gisattributen))
+    }
+    if (interactief & interactive()) {
+      tmap::tmap_mode("view")  
+      message("In de interactieve modus worden de attribuutwaarden niet altijd correct weergegeven ! Kies om deze te bekijken de plot-modus: interactief = FALSE")
+    } else {
+      tmap::tmap_mode("plot")
+    }
+    
+    if (hoeveel_records == "alle") {
+      print(data %>% sf::st_drop_geometry(), n = Inf)
+    } else if (hoeveel_records == "glimpse") {
+      print(dplyr::glimpse(data %>% sf::st_drop_geometry()))
+    } else {
+      head(data %>% sf::st_drop_geometry())
+    }
+    
+    if (!is.null(kader)) {
+      # croppen van de gislaag
+      fr <- sf::st_bbox(c(xmin = kader[1], ymin = kader[2], xmax = kader[3], ymax = kader[4]), crs = crs_Lambert)      
+      dataselect <- sf::st_crop(dataselect, y = fr)      
+    }
+    
+    if (gis_sample) {
+      df <- slice_sample(dataselect, prop = sample_prop)
+    } else {
+      df <- dataselect
+    }
+    if (!interactief) {
+      # t.osm <- opq("Turnhout") %>%
+      #   add_osm_feature(key = "nature") %>%        
+      #   osmdata_sf ()
+      osmtiles <- tmaptools::read_osm(bb(dataselect), type = "osm")
+      t <- tmap::tm_shape(osmtiles) + tmap::tm_shape(df)
+    } else {
+      t <- tmap::tm_shape(df) 
+    }
+    tmap::tmap_options(basemaps = c("OpenStreetMap", "Esri.WorldImagery","Esri.WorldGrayCanvas"),
+                       basemaps.alpha = c(0.7,0.6,1))
+    if (geometrie == "punt") {
+      t <- t + tmap::tm_dots(colnames(dataselect)[1:ncol(dataselect) - 1], n = aantal_klassen) + tm_legend(show = legende.tonen)
+    } else if (geometrie == "vlak") {
+      t <- t + tmap::tm_polygons(colnames(dataselect)[1:ncol(dataselect) - 1], n = aantal_klassen) + tm_legend(show = legende.tonen) 
+    } else {
+      t <- t + tmap::tm_lines(colnames(dataselect)[1:ncol(dataselect) - 1], n = aantal_klassen) + tm_legend(show = legende.tonen) 
+    }
+             
+    if (!is.null(facets)) t <- t + tmap::tm_facets(by = facets)
+      
+    t
+    
+    #  tmap::tmap_options_reset()
+
+  } else {
+    if (hoeveel_records == "alle") {
+      print(data, n = Inf)
+    } else if (hoeveel_records == "glimpse") {
+      print(dplyr::glimpse(data))
+    } else {
+      print(head(data))
+    }
+  }
+}
+
+
+aantal_overlappingen <- function(gislaag, naam = NULL){
+    
+    if (is.null(naam)) {
+      naam_object <- deparse(substitute(gislaag))
+    } else{
+      naam_object <- naam
+    }
+      
+    gis_overlap <- st_equals(gislaag)
+  # Dit object dient als basis om de regels te groeperen (alle overlappende polygonen steken we in één groep)
+  gis_groep_vb <- data.frame(dupli = duplicated(gis_overlap)) %>% 
+    rownames_to_column(var = "rijnr") %>% 
+    mutate(rijnr = as.numeric(rijnr)) %>% 
+    mutate(groep = if_else(!dupli, rijnr, 0),
+           groep2 = cumsum(groep)) %>% 
+    group_by(groep2) %>% 
+    mutate(eenheid = row_number(),
+           groepsnr = cur_group_id()) %>% 
+    ungroup() %>% 
+    dplyr::select(groepsnr, eenheid)
+  
+  # aantal overlappingen:
+  aantal_overlappingen <- nrow(gis_groep_vb %>% filter(eenheid != 1))
+  if (aantal_overlappingen > 0) {
+    print(paste("Er zijn in gislaag", naam_object , aantal_overlappingen, "overlappingen gevonden.", sep = " "))
+  } else {
+    print(paste("Er zijn in gislaag", naam_object , "geen overlappingen gevonden.", sep = " "))
+  }
+  return(list(aantal_overlappingen, gis_groep = gis_groep_vb ))
+}
+
+wegwerken_overlappingen <- function(gislaag, langetabel = TRUE, bewaren_gpkg = FALSE, naam_gpkg = NULL, id_als_idbron_behouden = TRUE ) {
+    naam_object <- deparse(substitute(gislaag))
+    if (bewaren_gpkg) if (!assertthat::is.string(naam_gpkg)) stop("bewaren_gpkg = TRUE, dan moet je een naam opgeven (als string) voor het gpkg-bestand")
+    check_overlappingen <- aantal_overlappingen(gislaag, naam_object)
+    if (check_overlappingen[[1]] > 0) {
+      gis_groep <- check_overlappingen[[2]]
+      
+      # bestaat er al een kolom met de naam 'id'?
+      if ("id" %in% colnames(gislaag)) {
+        if (id_als_idbron_behouden) {
+          gislaag <- gislaag %>% 
+            #oorspronkelijke id heeft geen enkele betekenis meer
+            rename(idbron = id)         
+        } else {
+          gislaag <- gislaag %>% 
+            #oorspronkelijke id heeft geen enkele betekenis meer
+            dplyr::select(-id)
+        }
+      }       
+      
+      gis_breed <- gislaag %>% 
+        bind_cols(gis_groep) %>% 
+        filter(eenheid == 1)
+
+      gis_breed <- gis_breed %>% 
+        rename(id = groepsnr) %>% 
+        dplyr::select(-eenheid) %>% 
+        relocate(id)
+      
+      if ("idbron" %in% colnames(gis_breed)) gis_breed <- gis_breed %>% dplyr::select(-idbron)
+      
+      if (langetabel) {
+         # Toevoegen van groepsnummer aan basislaag. We weten nu welke records overlappen.
+        gis_lang <- gislaag %>% 
+          st_drop_geometry() %>% 
+          bind_cols(gis_groep %>% dplyr::select(id = groepsnr)) %>% 
+          relocate(id)
+      }
+      
+      if (bewaren_gpkg) {
+        
+      }
+      if (langetabel) {
+        return(list(gis_breed = gis_breed, gis_lang = gis_lang))
+      } else {
+        return(gis_breed)
+      }
+    }
+
+}
+
+aanpassen_sha_in_bestandsnaam <- function(sha_oud = NULL, pad = NULL, sha_nieuw = NULL) {
+  path_to_interim_tv <- paste0(rprojroot::find_root(rprojroot::is_rstudio_project), 
+                          "/data/interim/")
+  if (is.null(sha_oud)) stop("Opgave van de oude sha is verplicht")
+  if (is.null(pad)) pad <- file.path(path_to_interim_tv)
+  if (is.null(sha_nieuw)) sha_nieuw = stringr::str_sub(system("git rev-parse HEAD", intern = TRUE),1,8) # sha van de de huidige commit
+  
+  bestandsnamen_bron <- list.files(path = pad, pattern = sha_oud)
+
+  files_bron <- paste(pad, bestandsnamen_bron, sep = "/")
+
+  files_doel <- stringr::str_replace(files_bron, pattern = sha_oud, replacement = sha_nieuw)
+
+  file.rename(from = files_bron, to = files_doel)
+}
 ```
 
 ```{r read-databases, include= FALSE}
@@ -472,5 +746,31 @@ if (params$refresh_data < 1) {
   raster_meetnet_poly <- suppressWarnings(read_sf(file.path(".","data","local", "raster_meetnet_poly.gpkg"), "raster_meetnet_poly"))
    
   habmap_gw_raster_overlay <- suppressWarnings(read_sf(file.path(".","data","local", "habmap_gw_raster_overlay.gpkg"), "habmap_gw_raster_overlay"))
+  
+  tubes_hab <- read_vc(
+    file.path(".","data","processed","meetnet","tubes_hab"))
 }
 ```
+```{r temp-inladen-selectie-pb}
+meetpt_selectie <- 
+  read_csv(file.path("data", "result", "meetnet", "local", "droogtemeetnet_202307.csv"))
+
+meetpt_zonder_sonde <- meetpt_selectie %>% 
+  filter(is.na(uitgerust_met_logger))
+
+meetpt_zonder_sonde_hab <- meetpt_zonder_sonde %>% 
+  inner_join(tubes_hab, by = join_by(loc_code))
+
+meetpt_hab <- meetpt_zonder_sonde_hab %>% 
+  dplyr::select(meetpunt = loc_code, type, groupnr, phab) %>% 
+  distinct() %>% 
+  group_by(meetpunt, groupnr) %>% 
+  arrange(desc(phab)) %>% 
+  summarise(type = paste0(type, collapse = " / ")) %>% 
+  slice_head(n = 1) %>% 
+  ungroup()
+
+write_csv(meetpt_hab, file.path("data", "result", "meetnet", "local", "meetpunt_hab.csv"))
+
+```
+
